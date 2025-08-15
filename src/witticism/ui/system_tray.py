@@ -1,0 +1,341 @@
+import logging
+import sys
+from pathlib import Path
+from PyQt5.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QAction, QMessageBox
+from PyQt5.QtCore import QObject, pyqtSignal, QThread, Qt
+from PyQt5.QtGui import QIcon, QPixmap
+from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+
+class TranscriptionWorker(QThread):
+    transcription_complete = pyqtSignal(str)
+    transcription_error = pyqtSignal(str)
+    status_update = pyqtSignal(str)
+    
+    def __init__(self, engine, audio_data):
+        super().__init__()
+        self.engine = engine
+        self.audio_data = audio_data
+        
+    def run(self):
+        try:
+            self.status_update.emit("Transcribing...")
+            result = self.engine.transcribe(self.audio_data)
+            text = self.engine.format_result(result)
+            self.transcription_complete.emit(text)
+        except Exception as e:
+            logger.error(f"Transcription error: {e}")
+            self.transcription_error.emit(str(e))
+
+
+class SystemTrayApp(QSystemTrayIcon):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        
+        self.engine = None
+        self.audio_capture = None
+        self.hotkey_manager = None
+        self.output_manager = None
+        self.config_manager = None
+        
+        self.is_recording = False
+        self.is_enabled = True
+        
+        self.init_ui()
+        self.set_status("Ready")
+        
+    def init_ui(self):
+        # Create tray icon
+        self.create_icon()
+        
+        # Create context menu
+        self.menu = QMenu()
+        
+        # Status action (disabled, just shows status)
+        self.status_action = QAction("Status: Ready")
+        self.status_action.setEnabled(False)
+        self.menu.addAction(self.status_action)
+        
+        self.menu.addSeparator()
+        
+        # Toggle enable/disable
+        self.toggle_action = QAction("Disable", self)
+        self.toggle_action.triggered.connect(self.toggle_enabled)
+        self.menu.addAction(self.toggle_action)
+        
+        # Push-to-talk action
+        self.ptt_action = QAction("Push-to-Talk (Hold F9)", self)
+        self.ptt_action.setEnabled(False)
+        self.menu.addAction(self.ptt_action)
+        
+        self.menu.addSeparator()
+        
+        # Model selection submenu
+        self.model_menu = self.menu.addMenu("Model")
+        self.create_model_menu()
+        
+        # Device selection submenu
+        self.device_menu = self.menu.addMenu("Audio Device")
+        self.update_device_menu()
+        
+        self.menu.addSeparator()
+        
+        # Settings action
+        self.settings_action = QAction("Settings...", self)
+        self.settings_action.triggered.connect(self.show_settings)
+        self.menu.addAction(self.settings_action)
+        
+        # About action
+        self.about_action = QAction("About", self)
+        self.about_action.triggered.connect(self.show_about)
+        self.menu.addAction(self.about_action)
+        
+        self.menu.addSeparator()
+        
+        # Quit action
+        self.quit_action = QAction("Quit", self)
+        self.quit_action.triggered.connect(self.quit_app)
+        self.menu.addAction(self.quit_action)
+        
+        # Set context menu
+        self.setContextMenu(self.menu)
+        
+        # Show tray icon
+        self.show()
+        
+        # Connect to activated signal for left click
+        self.activated.connect(self.on_tray_activated)
+        
+    def create_icon(self):
+        # Create a simple colored icon
+        pixmap = QPixmap(64, 64)
+        pixmap.fill(Qt.transparent)
+        
+        # Draw a simple microphone shape or use text
+        from PyQt5.QtGui import QPainter, QFont, QColor
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # Background circle
+        painter.setBrush(QColor(76, 175, 80))  # Green when ready
+        painter.setPen(Qt.NoPen)
+        painter.drawEllipse(8, 8, 48, 48)
+        
+        # Text
+        painter.setPen(Qt.white)
+        font = QFont("Arial", 20, QFont.Bold)
+        painter.setFont(font)
+        painter.drawText(pixmap.rect(), Qt.AlignCenter, "W")
+        
+        painter.end()
+        
+        icon = QIcon(pixmap)
+        self.setIcon(icon)
+        
+    def update_icon_color(self, color: str):
+        pixmap = QPixmap(64, 64)
+        pixmap.fill(Qt.transparent)
+        
+        from PyQt5.QtGui import QPainter, QFont, QColor
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # Map color names to QColor
+        color_map = {
+            "green": QColor(76, 175, 80),
+            "red": QColor(244, 67, 54),
+            "yellow": QColor(255, 193, 7),
+            "gray": QColor(158, 158, 158)
+        }
+        
+        # Background circle
+        painter.setBrush(color_map.get(color, QColor(76, 175, 80)))
+        painter.setPen(Qt.NoPen)
+        painter.drawEllipse(8, 8, 48, 48)
+        
+        # Text
+        painter.setPen(Qt.white)
+        font = QFont("Arial", 20, QFont.Bold)
+        painter.setFont(font)
+        painter.drawText(pixmap.rect(), Qt.AlignCenter, "W")
+        
+        painter.end()
+        
+        icon = QIcon(pixmap)
+        self.setIcon(icon)
+        
+    def create_model_menu(self):
+        models = ["tiny", "tiny.en", "base", "base.en", "small", "small.en", "medium", "medium.en", "large-v3"]
+        
+        model_group = []
+        for model in models:
+            action = QAction(model, self)
+            action.setCheckable(True)
+            if model == "base":  # Default
+                action.setChecked(True)
+            action.triggered.connect(lambda checked, m=model: self.change_model(m))
+            self.model_menu.addAction(action)
+            model_group.append(action)
+            
+        # Store for exclusive selection
+        self.model_actions = model_group
+        
+    def update_device_menu(self):
+        self.device_menu.clear()
+        
+        # Default device
+        default_action = QAction("Default", self)
+        default_action.setCheckable(True)
+        default_action.setChecked(True)
+        default_action.triggered.connect(lambda: self.change_audio_device(None))
+        self.device_menu.addAction(default_action)
+        
+        self.device_menu.addSeparator()
+        
+        # Get available devices from audio_capture when it's initialized
+        if self.audio_capture:
+            devices = self.audio_capture.get_audio_devices()
+            for device in devices:
+                action = QAction(device['name'], self)
+                action.setCheckable(True)
+                action.triggered.connect(
+                    lambda checked, idx=device['index']: self.change_audio_device(idx)
+                )
+                self.device_menu.addAction(action)
+                
+    def set_status(self, status: str):
+        self.status_action.setText(f"Status: {status}")
+        self.setToolTip(f"Witticism - {status}")
+        
+        # Update icon color based on status
+        if "Ready" in status:
+            self.update_icon_color("green")
+        elif "Recording" in status:
+            self.update_icon_color("red")
+        elif "Transcribing" in status:
+            self.update_icon_color("yellow")
+        elif "Disabled" in status:
+            self.update_icon_color("gray")
+        else:
+            self.update_icon_color("green")
+            
+    def toggle_enabled(self):
+        self.is_enabled = not self.is_enabled
+        if self.is_enabled:
+            self.toggle_action.setText("Disable")
+            self.set_status("Ready")
+            self.ptt_action.setEnabled(False)
+        else:
+            self.toggle_action.setText("Enable")
+            self.set_status("Disabled")
+            self.ptt_action.setEnabled(False)
+            
+    def start_recording(self):
+        if not self.is_enabled or self.is_recording:
+            return
+            
+        self.is_recording = True
+        self.set_status("Recording...")
+        
+        if self.audio_capture:
+            self.audio_capture.start_push_to_talk()
+            
+    def stop_recording(self):
+        if not self.is_recording:
+            return
+            
+        self.is_recording = False
+        self.set_status("Processing...")
+        
+        if self.audio_capture:
+            audio_data = self.audio_capture.stop_push_to_talk()
+            if len(audio_data) > 0:
+                self.process_transcription(audio_data)
+            else:
+                self.set_status("Ready")
+                
+    def process_transcription(self, audio_data):
+        if not self.engine:
+            self.set_status("Engine not initialized")
+            return
+            
+        # Convert to float32 for WhisperX
+        audio_float = audio_data.astype('float32') / 32768.0
+        
+        # Run transcription in worker thread
+        self.worker = TranscriptionWorker(self.engine, audio_float)
+        self.worker.transcription_complete.connect(self.on_transcription_complete)
+        self.worker.transcription_error.connect(self.on_transcription_error)
+        self.worker.status_update.connect(self.set_status)
+        self.worker.start()
+        
+    def on_transcription_complete(self, text):
+        self.set_status("Ready")
+        
+        if text and self.output_manager:
+            self.output_manager.output_text(text)
+            
+    def on_transcription_error(self, error):
+        self.set_status("Error")
+        logger.error(f"Transcription error: {error}")
+        
+    def change_model(self, model_name: str):
+        # Uncheck all other models
+        for action in self.model_actions:
+            action.setChecked(action.text() == model_name)
+            
+        if self.engine:
+            self.set_status(f"Loading {model_name}...")
+            self.engine.change_model(model_name)
+            self.set_status("Ready")
+            
+    def change_audio_device(self, device_index: Optional[int]):
+        # Update checkmarks
+        for action in self.device_menu.actions():
+            if action.text() == "Default":
+                action.setChecked(device_index is None)
+            else:
+                action.setChecked(False)
+                
+        # Store selected device
+        self.selected_device = device_index
+        
+    def show_settings(self):
+        # TODO: Implement settings dialog
+        QMessageBox.information(self, "Settings", "Settings dialog not yet implemented")
+        
+    def show_about(self):
+        QMessageBox.about(
+            self,
+            "About Witticism",
+            "Witticism v0.1.0\n\n"
+            "WhisperX-powered transcription tool\n"
+            "Type with your voice anywhere!\n\n"
+            "Hold F9 to record, release to transcribe."
+        )
+        
+    def on_tray_activated(self, reason):
+        if reason == QSystemTrayIcon.Trigger:
+            # Left click - show menu at cursor position
+            self.menu.popup(self.geometry().center())
+            
+    def quit_app(self):
+        # Cleanup
+        if self.audio_capture:
+            self.audio_capture.cleanup()
+        if self.hotkey_manager:
+            self.hotkey_manager.stop()
+            
+        QApplication.quit()
+        
+    def set_components(self, engine, audio_capture, hotkey_manager, output_manager, config_manager):
+        self.engine = engine
+        self.audio_capture = audio_capture
+        self.hotkey_manager = hotkey_manager
+        self.output_manager = output_manager
+        self.config_manager = config_manager
+        
+        # Update device menu now that we have audio_capture
+        self.update_device_menu()
