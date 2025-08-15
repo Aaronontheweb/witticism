@@ -14,11 +14,19 @@ Built to solve GPU acceleration issues with whisper.cpp. WhisperX provides:
 
 ### Prerequisites
 
-- Python 3.8+
+- **Python 3.9-3.12** (Python 3.13+ not yet supported due to WhisperX dependencies)
 - CUDA-capable GPU (optional but recommended)
 - Ubuntu/Linux (tested on Ubuntu 24.04)
+- System dependencies: `portaudio19-dev` (for audio capture)
 
-### Quick Start
+### Quick Start with uvx (Recommended)
+
+Run directly without installation:
+```bash
+uvx witticism
+```
+
+### Manual Installation
 
 1. Clone the repository:
 ```bash
@@ -26,7 +34,18 @@ git clone https://github.com/yourusername/witticism.git
 cd witticism
 ```
 
-2. Install dependencies:
+2. Install system dependencies:
+```bash
+sudo apt-get install portaudio19-dev
+```
+
+3. Create virtual environment (Python 3.12 or lower):
+```bash
+python3.12 -m venv venv
+source venv/bin/activate
+```
+
+4. Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
@@ -36,7 +55,7 @@ For GPU support with CUDA:
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 ```
 
-3. Run the application:
+5. Run the application:
 ```bash
 python -m witticism.main
 ```

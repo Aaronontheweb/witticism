@@ -1,10 +1,39 @@
 import logging
-import torch
-import whisperx
 from typing import Optional, Dict, Any, Tuple
 import numpy as np
 
-logger = logging.getLogger(__name__)
+# Try to import WhisperX, fall back to mock if not available
+try:
+    import torch
+    import whisperx
+    WHISPERX_AVAILABLE = True
+    logger = logging.getLogger(__name__)
+    logger.info("WhisperX library loaded successfully")
+except ImportError:
+    from . import mock_whisperx as whisperx
+    WHISPERX_AVAILABLE = False
+    logger = logging.getLogger(__name__)
+    logger.warning("WhisperX not available, using mock implementation for testing")
+    
+    # Mock torch for device detection
+    class MockTorch:
+        class cuda:
+            @staticmethod
+            def is_available():
+                return False
+            @staticmethod
+            def empty_cache():
+                pass
+            @staticmethod
+            def memory_allocated(device=0):
+                return 0
+            @staticmethod
+            def memory_reserved(device=0):
+                return 0
+            @staticmethod
+            def get_device_name(device=0):
+                return "Mock GPU"
+    torch = MockTorch()
 
 
 class WhisperXEngine:
