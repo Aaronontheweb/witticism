@@ -5,8 +5,16 @@ import signal
 import logging
 import argparse
 from pathlib import Path
-from PyQt5.QtWidgets import QApplication, QMessageBox
-from PyQt5.QtCore import Qt
+try:
+    from PyQt5.QtWidgets import QApplication, QMessageBox
+    from PyQt5.QtCore import Qt
+except ImportError:
+    # Try alternative import
+    from PyQt5 import QtWidgets as QtW
+    from PyQt5 import QtCore
+    QApplication = QtW.QApplication
+    QMessageBox = QtW.QMessageBox
+    Qt = QtCore.Qt
 
 from witticism.core.whisperx_engine import WhisperXEngine
 from witticism.core.audio_capture import PushToTalkCapture
@@ -116,7 +124,8 @@ class WitticismApp:
         app.setQuitOnLastWindowClosed(False)
         
         # Check system tray availability
-        if not QApplication.systemTrayIcon():
+        from PyQt5.QtWidgets import QSystemTrayIcon
+        if not QSystemTrayIcon.isSystemTrayAvailable():
             QMessageBox.critical(None, "System Tray", "System tray is not available on this system.")
             sys.exit(1)
             
@@ -139,10 +148,11 @@ class WitticismApp:
         
         # Show initial notification
         if self.config_manager.get("ui.show_notifications", True):
+            from PyQt5.QtWidgets import QSystemTrayIcon
             self.tray_app.showMessage(
                 "Witticism",
                 "Voice transcription ready. Hold F9 to record.",
-                QApplication.systemTrayIcon(),
+                QSystemTrayIcon.Information,
                 3000
             )
             
