@@ -103,7 +103,8 @@ class WitticismApp:
         self.hotkey_manager.set_callbacks(
             on_push_to_talk_start=self.tray_app.start_recording,
             on_push_to_talk_stop=self.tray_app.stop_recording,
-            on_toggle=self.tray_app.toggle_enabled
+            on_toggle=self.tray_app.toggle_enabled,
+            on_toggle_dictation=self.tray_app.toggle_dictation
         )
         
         # Pass components to tray app
@@ -151,7 +152,7 @@ class WitticismApp:
             from PyQt5.QtWidgets import QSystemTrayIcon
             self.tray_app.showMessage(
                 "Witticism",
-                "Voice transcription ready. Hold F9 to record.",
+                "Voice transcription ready. Hold F9 to record (or switch to Toggle mode).",
                 QSystemTrayIcon.Information,
                 3000
             )

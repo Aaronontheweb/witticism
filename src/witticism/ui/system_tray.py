@@ -2,9 +2,10 @@ import logging
 import sys
 from pathlib import Path
 from PyQt5.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QAction, QMessageBox
-from PyQt5.QtCore import QObject, pyqtSignal, QThread, Qt
+from PyQt5.QtCore import QObject, pyqtSignal, QThread, Qt, QTimer
 from PyQt5.QtGui import QIcon, QPixmap
 from typing import Optional
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -36,12 +37,15 @@ class SystemTrayApp(QSystemTrayIcon):
         
         self.engine = None
         self.audio_capture = None
+        self.continuous_capture = None  # For toggle mode
         self.hotkey_manager = None
         self.output_manager = None
         self.config_manager = None
         
         self.is_recording = False
         self.is_enabled = True
+        self.is_dictating = False  # For toggle mode
+        self.mode = "push_to_talk"  # "push_to_talk" or "toggle"
         
         self.init_ui()
         self.set_status("Ready")
@@ -69,6 +73,10 @@ class SystemTrayApp(QSystemTrayIcon):
         self.ptt_action = QAction("Push-to-Talk (Hold F9)", self)
         self.ptt_action.setEnabled(False)
         self.menu.addAction(self.ptt_action)
+        
+        # Mode selection submenu
+        self.mode_menu = self.menu.addMenu("Mode")
+        self.create_mode_menu()
         
         self.menu.addSeparator()
         
@@ -166,6 +174,22 @@ class SystemTrayApp(QSystemTrayIcon):
         icon = QIcon(pixmap)
         self.setIcon(icon)
         
+    def create_mode_menu(self):
+        # Push-to-talk mode
+        ptt_mode_action = QAction("Push-to-Talk", self)
+        ptt_mode_action.setCheckable(True)
+        ptt_mode_action.setChecked(True)
+        ptt_mode_action.triggered.connect(lambda: self.change_mode("push_to_talk"))
+        self.mode_menu.addAction(ptt_mode_action)
+        
+        # Toggle mode
+        toggle_mode_action = QAction("Toggle Dictation", self)
+        toggle_mode_action.setCheckable(True)
+        toggle_mode_action.triggered.connect(lambda: self.change_mode("toggle"))
+        self.mode_menu.addAction(toggle_mode_action)
+        
+        self.mode_actions = [ptt_mode_action, toggle_mode_action]
+        
     def create_model_menu(self):
         models = ["tiny", "tiny.en", "base", "base.en", "small", "small.en", "medium", "medium.en", "large-v3"]
         
@@ -214,6 +238,8 @@ class SystemTrayApp(QSystemTrayIcon):
             self.update_icon_color("green")
         elif "Recording" in status:
             self.update_icon_color("red")
+        elif "Dictating" in status:
+            self.update_icon_color("red")  # Red for active dictation
         elif "Transcribing" in status:
             self.update_icon_color("yellow")
         elif "Disabled" in status:
@@ -291,6 +317,93 @@ class SystemTrayApp(QSystemTrayIcon):
             self.engine.change_model(model_name)
             self.set_status("Ready")
             
+    def change_mode(self, mode: str):
+        """Switch between push-to-talk and toggle modes"""
+        self.mode = mode
+        
+        # Update UI checkmarks
+        for action in self.mode_actions:
+            if mode == "push_to_talk":
+                action.setChecked(action.text() == "Push-to-Talk")
+            else:
+                action.setChecked(action.text() == "Toggle Dictation")
+        
+        # Update hotkey manager mode
+        if self.hotkey_manager:
+            self.hotkey_manager.set_mode(mode)
+            
+        # Update PTT action text
+        if mode == "push_to_talk":
+            self.ptt_action.setText("Push-to-Talk (Hold F9)")
+        else:
+            self.ptt_action.setText("Toggle Dictation (Press F9)")
+            
+        # Stop any ongoing dictation if switching away from toggle mode
+        if mode == "push_to_talk" and self.is_dictating:
+            self.stop_dictation()
+            
+        logger.info(f"Mode changed to: {mode}")
+        
+    def toggle_dictation(self, active: bool):
+        """Handle toggle dictation on/off"""
+        if active:
+            self.start_dictation()
+        else:
+            self.stop_dictation()
+            
+    def start_dictation(self):
+        """Start continuous dictation mode"""
+        if self.is_dictating or not self.is_enabled:
+            return
+            
+        self.is_dictating = True
+        self.set_status("Dictating...")
+        
+        # Initialize continuous capture if not already done
+        if not self.continuous_capture and self.audio_capture:
+            from witticism.core.audio_capture import ContinuousCapture
+            self.continuous_capture = ContinuousCapture(
+                chunk_callback=self.process_chunk,
+                sample_rate=16000,
+                channels=1,
+                vad_aggressiveness=2
+            )
+            
+        if self.continuous_capture:
+            self.continuous_capture.start_continuous()
+            logger.info("Started continuous dictation")
+            
+    def stop_dictation(self):
+        """Stop continuous dictation mode"""
+        if not self.is_dictating:
+            return
+            
+        self.is_dictating = False
+        self.set_status("Ready")
+        
+        if self.continuous_capture:
+            self.continuous_capture.stop_continuous()
+            logger.info("Stopped continuous dictation")
+            
+    def process_chunk(self, audio_data: np.ndarray):
+        """Process audio chunk for real-time transcription"""
+        if not self.engine or not self.is_dictating:
+            return
+            
+        # Convert to float32 for WhisperX
+        audio_float = audio_data.astype('float32') / 32768.0
+        
+        # Run transcription in worker thread
+        worker = TranscriptionWorker(self.engine, audio_float)
+        worker.transcription_complete.connect(self.on_chunk_transcribed)
+        worker.transcription_error.connect(self.on_transcription_error)
+        worker.start()
+        
+    def on_chunk_transcribed(self, text):
+        """Handle transcribed chunk text"""
+        if text and self.output_manager and self.is_dictating:
+            self.output_manager.output_text(text + " ")  # Add space between chunks
+            
     def change_audio_device(self, device_index: Optional[int]):
         # Update checkmarks
         for action in self.device_menu.actions():
@@ -313,7 +426,9 @@ class SystemTrayApp(QSystemTrayIcon):
             "Witticism v0.1.0\n\n"
             "WhisperX-powered transcription tool\n"
             "Type with your voice anywhere!\n\n"
-            "Hold F9 to record, release to transcribe."
+            "Push-to-Talk: Hold F9 to record, release to transcribe.\n"
+            "Toggle Mode: Press F9 to start/stop continuous dictation.\n"
+            "Switch modes: Ctrl+Alt+M"
         )
         
     def on_tray_activated(self, reason):

@@ -16,10 +16,15 @@ class HotkeyManager:
         self.on_push_to_talk_start = None
         self.on_push_to_talk_stop = None
         self.on_toggle = None
+        self.on_toggle_dictation = None
         
         # PTT state
         self.ptt_key = keyboard.Key.f9
         self.ptt_active = False
+        
+        # Mode state
+        self.mode = "push_to_talk"  # "push_to_talk" or "toggle"
+        self.dictation_active = False
         
         logger.info("HotkeyManager initialized")
         
@@ -27,11 +32,13 @@ class HotkeyManager:
         self,
         on_push_to_talk_start: Optional[Callable] = None,
         on_push_to_talk_stop: Optional[Callable] = None,
-        on_toggle: Optional[Callable] = None
+        on_toggle: Optional[Callable] = None,
+        on_toggle_dictation: Optional[Callable] = None
     ):
         self.on_push_to_talk_start = on_push_to_talk_start
         self.on_push_to_talk_stop = on_push_to_talk_stop
         self.on_toggle = on_toggle
+        self.on_toggle_dictation = on_toggle_dictation
         
     def start(self):
         if self.listener:
@@ -55,23 +62,30 @@ class HotkeyManager:
             
     def _on_key_press(self, key):
         try:
-            # Handle push-to-talk
-            if key == self.ptt_key and not self.ptt_active:
-                self.ptt_active = True
-                logger.debug("PTT key pressed")
-                if self.on_push_to_talk_start:
-                    self.on_push_to_talk_start()
+            # Handle F9 based on mode
+            if key == self.ptt_key:
+                if self.mode == "push_to_talk":
+                    # Push-to-talk mode
+                    if not self.ptt_active:
+                        self.ptt_active = True
+                        logger.debug("PTT key pressed")
+                        if self.on_push_to_talk_start:
+                            self.on_push_to_talk_start()
+                elif self.mode == "toggle":
+                    # Toggle mode - F9 toggles dictation on/off
+                    # We'll handle this on key release to avoid repeated toggles
+                    pass
                     
             # Track current keys for combinations
             self.current_keys.add(key)
             
-            # Check for toggle combination (Ctrl+Alt+M)
+            # Check for mode switch combination (Ctrl+Alt+M)
             if self._is_combo_pressed(
                 keyboard.Key.ctrl_l,
                 keyboard.Key.alt_l,
                 keyboard.KeyCode.from_char('m')
             ):
-                logger.debug("Toggle hotkey pressed")
+                logger.debug("Mode toggle hotkey pressed")
                 if self.on_toggle:
                     self.on_toggle()
                     
@@ -80,12 +94,21 @@ class HotkeyManager:
             
     def _on_key_release(self, key):
         try:
-            # Handle push-to-talk release
-            if key == self.ptt_key and self.ptt_active:
-                self.ptt_active = False
-                logger.debug("PTT key released")
-                if self.on_push_to_talk_stop:
-                    self.on_push_to_talk_stop()
+            # Handle F9 based on mode
+            if key == self.ptt_key:
+                if self.mode == "push_to_talk":
+                    # Push-to-talk mode - stop recording on release
+                    if self.ptt_active:
+                        self.ptt_active = False
+                        logger.debug("PTT key released")
+                        if self.on_push_to_talk_stop:
+                            self.on_push_to_talk_stop()
+                elif self.mode == "toggle":
+                    # Toggle mode - toggle dictation state
+                    self.dictation_active = not self.dictation_active
+                    logger.debug(f"Toggle dictation: {self.dictation_active}")
+                    if self.on_toggle_dictation:
+                        self.on_toggle_dictation(self.dictation_active)
                     
             # Remove from current keys
             self.current_keys.discard(key)
@@ -114,6 +137,20 @@ class HotkeyManager:
     def change_ptt_key(self, key):
         self.ptt_key = key
         logger.info(f"PTT key changed to: {key}")
+        
+    def set_mode(self, mode: str):
+        """Set the hotkey mode: 'push_to_talk' or 'toggle'"""
+        if mode not in ["push_to_talk", "toggle"]:
+            raise ValueError(f"Invalid mode: {mode}")
+        
+        # If switching from toggle mode while dictation is active, stop it
+        if self.mode == "toggle" and mode == "push_to_talk" and self.dictation_active:
+            self.dictation_active = False
+            if self.on_toggle_dictation:
+                self.on_toggle_dictation(False)
+                
+        self.mode = mode
+        logger.info(f"Hotkey mode changed to: {mode}")
 
 
 class GlobalHotkeyManager(HotkeyManager):

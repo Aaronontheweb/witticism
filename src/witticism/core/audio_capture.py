@@ -225,3 +225,64 @@ class PushToTalkCapture(AudioCapture):
         audio_data = self.stop_recording()
         logger.info(f"Push-to-talk stopped. Duration: {len(audio_data)/self.sample_rate:.2f}s")
         return audio_data
+
+
+class ContinuousCapture(AudioCapture):
+    """Continuous audio capture with chunked processing for real-time transcription"""
+    
+    def __init__(self, chunk_callback: Optional[Callable] = None, **kwargs):
+        super().__init__(**kwargs)
+        self.chunk_callback = chunk_callback
+        self.continuous_active = False
+        self.chunk_buffer = []
+        self.chunk_duration = 2.0  # Process chunks every 2 seconds
+        
+    def start_continuous(self, device_index: Optional[int] = None) -> None:
+        if self.continuous_active:
+            return
+            
+        self.continuous_active = True
+        self.chunk_buffer = []
+        
+        # Start recording with chunk callback
+        self.start_recording(
+            device_index=device_index,
+            callback=self._process_chunk
+        )
+        logger.info("Continuous capture started")
+        
+    def stop_continuous(self) -> None:
+        if not self.continuous_active:
+            return
+            
+        self.continuous_active = False
+        
+        # Process any remaining audio
+        if self.chunk_buffer:
+            audio_chunk = np.concatenate(self.chunk_buffer)
+            if self.chunk_callback and len(audio_chunk) > 0:
+                self.chunk_callback(audio_chunk)
+            self.chunk_buffer = []
+            
+        self.stop_recording()
+        logger.info("Continuous capture stopped")
+        
+    def _process_chunk(self, audio_data: np.ndarray) -> None:
+        """Process audio chunks for real-time transcription"""
+        if not self.continuous_active:
+            return
+            
+        # Add to buffer
+        self.chunk_buffer.append(audio_data)
+        
+        # Calculate buffer duration
+        buffer_samples = sum(len(chunk) for chunk in self.chunk_buffer)
+        buffer_duration = buffer_samples / self.sample_rate
+        
+        # Process if we have enough audio
+        if buffer_duration >= self.chunk_duration:
+            audio_chunk = np.concatenate(self.chunk_buffer)
+            self.chunk_buffer = []
+            
+            if self.chunk_callback:
+                self.chunk_callback(audio_chunk)
