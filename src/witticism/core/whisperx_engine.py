@@ -52,7 +52,7 @@ class WhisperXEngine:
         self.hf_token = hf_token
         
         # Auto-detect device
-        if device is None:
+        if device is None or device == "auto":
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
         else:
             self.device = device
@@ -118,11 +118,17 @@ class WhisperXEngine:
                 torch.cuda.empty_cache()
                 
             # Transcribe audio
+            transcribe_kwargs = {
+                "batch_size": batch_size,
+                "language": language or self.language
+            }
+            # Only add suppress_numerals if supported (not in faster-whisper)
+            if not WHISPERX_AVAILABLE:
+                transcribe_kwargs["suppress_numerals"] = suppress_numerals
+                
             result = self.model.transcribe(
                 audio,
-                batch_size=batch_size,
-                language=language or self.language,
-                suppress_numerals=suppress_numerals
+                **transcribe_kwargs
             )
             
             # Align for word-level timestamps
