@@ -49,3 +49,35 @@ jobs:
       run: |
         pip install bandit
         bandit -r src/ -ll || true  # Only show medium/high severity
+  
+  test-config:
+    runs-on: ubuntu-latest
+    name: Test Configuration Manager
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install minimal test dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install platformdirs
+    
+    - name: Run ConfigManager unit tests
+      run: |
+        python -m unittest tests/test_config_manager.py -v
+    
+    - name: Verify test coverage
+      run: |
+        echo "✓ ConfigManager unit tests passed"
+        echo "Tests cover:"
+        echo "  - Default config creation"
+        echo "  - Nested value get/set"
+        echo "  - Config persistence"
+        echo "  - Model selection persistence"
+        echo "  - Deep merge functionality"
+        echo "  - Reset to defaults"

@@ -1,3 +1,4 @@
+import copy
 import json
 import logging
 from pathlib import Path
@@ -69,14 +70,14 @@ class ConfigManager:
                     user_config = json.load(f)
                     
                 # Merge with defaults
-                self.config = self._deep_merge(self.default_config.copy(), user_config)
+                self.config = self._deep_merge(copy.deepcopy(self.default_config), user_config)
                 logger.info(f"Config loaded from {self.config_file}")
                 
             except Exception as e:
                 logger.error(f"Failed to load config: {e}")
-                self.config = self.default_config.copy()
+                self.config = copy.deepcopy(self.default_config)
         else:
-            self.config = self.default_config.copy()
+            self.config = copy.deepcopy(self.default_config)
             self.save_config()  # Save defaults
             
         return self.config
@@ -132,7 +133,7 @@ class ConfigManager:
         return base
         
     def reset_to_defaults(self) -> None:
-        self.config = self.default_config.copy()
+        self.config = copy.deepcopy(self.default_config)
         self.save_config()
         logger.info("Config reset to defaults")
         
@@ -149,7 +150,7 @@ class ConfigManager:
             with open(path, 'r') as f:
                 imported = json.load(f)
                 
-            self.config = self._deep_merge(self.default_config.copy(), imported)
+            self.config = self._deep_merge(copy.deepcopy(self.default_config), imported)
             self.save_config()
             logger.info(f"Config imported from {path}")
             
