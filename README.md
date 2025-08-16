@@ -170,4 +170,4 @@ src/witticism/
 
 ## License
 
-MIT
+Apache-2.0
