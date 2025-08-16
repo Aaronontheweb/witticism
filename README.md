@@ -26,15 +26,15 @@ This will:
 - ✅ Configure the system tray icon
 - ✅ Install all dependencies in an isolated environment
 
+### Manual Installation
+
+If you prefer to install manually:
+
 ### Prerequisites
 
 - **Linux** (Ubuntu, Fedora, Debian, etc.)
 - **Python 3.10-3.12** (installed automatically if needed)
 - **NVIDIA GPU** (optional but recommended for faster transcription)
-
-### Manual Installation
-
-If you prefer to install manually:
 
 1. Install system dependencies:
 ```bash
@@ -46,7 +46,12 @@ sudo apt-get install portaudio19-dev
 pipx install witticism
 ```
 
-3. Set up auto-start (optional):
+3. For GPU support with CUDA (optional but recommended):
+```bash
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+```
+
+4. Set up auto-start (optional):
 ```bash
 mkdir -p ~/.config/autostart
 cat > ~/.config/autostart/witticism.desktop << EOF
@@ -68,25 +73,9 @@ To upgrade to the latest version:
 pipx upgrade witticism
 ```
 
-Or if you used the installer:
+Or use the upgrade script:
 ```bash
-curl -sSL https://raw.githubusercontent.com/Aaronontheweb/witticism/main/install.sh | bash
-```
-
-For GPU support with CUDA:
-```bash
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-```
-
-5. Run the application:
-```bash
-python -m witticism.main
-```
-
-Or install it:
-```bash
-pip install -e .
-witticism
+curl -sSL https://raw.githubusercontent.com/Aaronontheweb/witticism/main/upgrade.sh | bash
 ```
 
 ## Usage
