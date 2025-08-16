@@ -12,42 +12,65 @@ Built to solve GPU acceleration issues with whisper.cpp. WhisperX provides:
 
 ## Installation
 
+### Quick Install (Recommended)
+
+One-command installation with automatic GPU detection and auto-start:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/Aaronontheweb/witticism/main/install.sh | bash
+```
+
+This will:
+- ✅ Detect your GPU and install the right CUDA version
+- ✅ Set up Witticism to start automatically on login
+- ✅ Configure the system tray icon
+- ✅ Install all dependencies in an isolated environment
+
 ### Prerequisites
 
-- **Python 3.9-3.12** (Python 3.13+ not yet supported due to WhisperX dependencies)
-- CUDA-capable GPU (optional but recommended)
-- Ubuntu/Linux (tested on Ubuntu 24.04)
-- System dependencies: `portaudio19-dev` (for audio capture)
-
-### Quick Start with uvx (Recommended)
-
-Run directly without installation:
-```bash
-uvx witticism
-```
+- **Linux** (Ubuntu, Fedora, Debian, etc.)
+- **Python 3.10-3.12** (installed automatically if needed)
+- **NVIDIA GPU** (optional but recommended for faster transcription)
 
 ### Manual Installation
 
-1. Clone the repository:
-```bash
-git clone https://github.com/yourusername/witticism.git
-cd witticism
-```
+If you prefer to install manually:
 
-2. Install system dependencies:
+1. Install system dependencies:
 ```bash
 sudo apt-get install portaudio19-dev
 ```
 
-3. Create virtual environment (Python 3.12 or lower):
+2. Install with pipx:
 ```bash
-python3.12 -m venv venv
-source venv/bin/activate
+pipx install witticism
 ```
 
-4. Install dependencies:
+3. Set up auto-start (optional):
 ```bash
-pip install -r requirements.txt
+mkdir -p ~/.config/autostart
+cat > ~/.config/autostart/witticism.desktop << EOF
+[Desktop Entry]
+Type=Application
+Name=Witticism
+Exec=$HOME/.local/bin/witticism
+StartupNotify=false
+Terminal=false
+X-GNOME-Autostart-enabled=true
+EOF
+```
+
+### Upgrading
+
+To upgrade to the latest version:
+
+```bash
+pipx upgrade witticism
+```
+
+Or if you used the installer:
+```bash
+curl -sSL https://raw.githubusercontent.com/Aaronontheweb/witticism/main/install.sh | bash
 ```
 
 For GPU support with CUDA:
