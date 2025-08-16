@@ -1,5 +1,10 @@
 # Witticism
 
+[![CI](https://github.com/Aaronontheweb/witticism/actions/workflows/ci.yml/badge.svg)](https://github.com/Aaronontheweb/witticism/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Python](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org/downloads/)
+[![GitHub release](https://img.shields.io/github/release/Aaronontheweb/witticism.svg)](https://github.com/Aaronontheweb/witticism/releases/latest)
+
 🎙️ **One-command install. Zero configuration. Just works.**
 
 WhisperX-powered voice transcription tool that types text directly at your cursor position. Hold F9 to record, release to transcribe.
