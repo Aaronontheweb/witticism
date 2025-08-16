@@ -30,7 +30,7 @@ jobs:
     
     - name: Run ruff (fast linter)
       run: |
-        ruff check src/ --select E,F,W --ignore E501,E402,F401 || true
+        ruff check src/ --select E,F,W --ignore E501,E402,F401
     
     - name: Check for common errors with pyflakes
       run: |
@@ -48,7 +48,7 @@ jobs:
     - name: Check for security issues
       run: |
         pip install bandit
-        bandit -r src/ -ll || true  # Only show medium/high severity
+        bandit -r src/ -ll  # Only show medium/high severity
   
   test:
     runs-on: ubuntu-latest
