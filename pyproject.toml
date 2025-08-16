@@ -11,7 +11,7 @@ requires-python = ">=3.9,<3.13"
 authors = [
     {name = "Aaron Stannard", email = "aaron@petabridge.com"}
 ]
-license = "MIT"
+license = "Apache-2.0"
 keywords = ["transcription", "whisperx", "speech-recognition", "push-to-talk"]
 classifiers = [
     "Development Status :: 4 - Beta",
