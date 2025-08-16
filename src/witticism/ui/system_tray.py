@@ -6,6 +6,7 @@ from PyQt5.QtCore import QObject, pyqtSignal, QThread, Qt, QTimer
 from PyQt5.QtGui import QIcon, QPixmap
 from typing import Optional
 import numpy as np
+from witticism.core.continuous_transcriber import ContinuousTranscriber
 
 logger = logging.getLogger(__name__)
 
@@ -193,9 +194,36 @@ class SystemTrayApp(QSystemTrayIcon):
     def create_model_menu(self):
         models = ["tiny", "tiny.en", "base", "base.en", "small", "small.en", "medium", "medium.en", "large-v3"]
         
+        # Check which models are cached
+        from pathlib import Path
+        cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
+        cached_models = set()
+        
+        if cache_dir.exists():
+            for model_dir in cache_dir.glob("models--Systran--faster-whisper-*"):
+                model_name = model_dir.name.replace("models--Systran--faster-whisper-", "")
+                # Map folder names to model names
+                if model_name == "large-v3":
+                    cached_models.add("large-v3")
+                elif model_name in ["tiny", "base", "small", "medium"]:
+                    cached_models.add(model_name)
+                    # Also mark the English-only variants
+                    if model_name in ["tiny", "base", "small", "medium"]:
+                        cached_models.add(f"{model_name}.en")
+        
         model_group = []
         for model in models:
-            action = QAction(model, self)
+            # Add visual indicator and tooltip based on cache status
+            if model in cached_models or model.replace(".en", "") in cached_models:
+                display_name = f"● {model}"  # Filled circle for downloaded models
+                action = QAction(display_name, self)
+                action.setToolTip(f"{model} - Ready (cached locally)")
+            else:
+                display_name = f"○ {model}"  # Empty circle for models that need downloading
+                action = QAction(display_name, self)
+                action.setToolTip(f"{model} - Needs download (will download on first use)")
+                
+            action.setData(model)  # Store actual model name
             action.setCheckable(True)
             if model == "base":  # Default
                 action.setChecked(True)
@@ -310,11 +338,21 @@ class SystemTrayApp(QSystemTrayIcon):
     def change_model(self, model_name: str):
         # Uncheck all other models
         for action in self.model_actions:
-            action.setChecked(action.text() == model_name)
+            action.setChecked(action.data() == model_name)
             
         if self.engine:
+            # Stop dictation if active (model change invalidates transcriber)
+            if self.is_dictating:
+                self.stop_dictation()
+                
             self.set_status(f"Loading {model_name}...")
             self.engine.change_model(model_name)
+            
+            # Recreate continuous transcriber with new engine
+            if hasattr(self, 'continuous_transcriber'):
+                self.continuous_transcriber.stop()
+                del self.continuous_transcriber
+                
             self.set_status("Ready")
             
     def change_mode(self, mode: str):
@@ -359,16 +397,26 @@ class SystemTrayApp(QSystemTrayIcon):
         self.is_dictating = True
         self.set_status("Dictating...")
         
+        # Initialize continuous transcriber if not already done
+        if not hasattr(self, 'continuous_transcriber'):
+            self.continuous_transcriber = ContinuousTranscriber(
+                self.engine,
+                self.on_continuous_text
+            )
+            
         # Initialize continuous capture if not already done
         if not self.continuous_capture and self.audio_capture:
             from witticism.core.audio_capture import ContinuousCapture
             self.continuous_capture = ContinuousCapture(
-                chunk_callback=self.process_chunk,
+                chunk_callback=self.continuous_transcriber.process_audio,
                 sample_rate=16000,
                 channels=1,
                 vad_aggressiveness=2
             )
             
+        # Start transcriber first, then capture
+        self.continuous_transcriber.start()
+        
         if self.continuous_capture:
             self.continuous_capture.start_continuous()
             logger.info("Started continuous dictation")
@@ -383,26 +431,19 @@ class SystemTrayApp(QSystemTrayIcon):
         
         if self.continuous_capture:
             self.continuous_capture.stop_continuous()
-            logger.info("Stopped continuous dictation")
+            # Clean up continuous capture so it's recreated fresh next time
+            self.continuous_capture.cleanup()
+            self.continuous_capture = None
             
-    def process_chunk(self, audio_data: np.ndarray):
-        """Process audio chunk for real-time transcription"""
-        if not self.engine or not self.is_dictating:
-            return
+        if hasattr(self, 'continuous_transcriber'):
+            self.continuous_transcriber.stop()
             
-        # Convert to float32 for WhisperX
-        audio_float = audio_data.astype('float32') / 32768.0
-        
-        # Run transcription in worker thread
-        worker = TranscriptionWorker(self.engine, audio_float)
-        worker.transcription_complete.connect(self.on_chunk_transcribed)
-        worker.transcription_error.connect(self.on_transcription_error)
-        worker.start()
-        
-    def on_chunk_transcribed(self, text):
-        """Handle transcribed chunk text"""
+        logger.info("Stopped continuous dictation")
+            
+    def on_continuous_text(self, text):
+        """Handle continuous transcription text output"""
         if text and self.output_manager and self.is_dictating:
-            self.output_manager.output_text(text + " ")  # Add space between chunks
+            self.output_manager.output_text(text)
             
     def change_audio_device(self, device_index: Optional[int]):
         # Update checkmarks
@@ -438,8 +479,17 @@ class SystemTrayApp(QSystemTrayIcon):
             
     def quit_app(self):
         # Cleanup
+        if self.is_dictating:
+            self.stop_dictation()
+            
+        # Clean up continuous transcriber
+        if hasattr(self, 'continuous_transcriber'):
+            self.continuous_transcriber.stop()
+            
         if self.audio_capture:
             self.audio_capture.cleanup()
+        if self.continuous_capture:
+            self.continuous_capture.cleanup()
         if self.hotkey_manager:
             self.hotkey_manager.stop()
             

@@ -184,6 +184,10 @@ class AudioCapture:
                                 speech_frames = []
                                 silence_frames = 0
                                 speech_start_time = None
+                    
+                    # Also add frames to buffer for continuous capture
+                    if is_speech:
+                        speech_frames.append(audio_np)
                                 
             except Exception as e:
                 logger.error(f"Error in capture loop: {e}")
@@ -236,6 +240,7 @@ class ContinuousCapture(AudioCapture):
         self.continuous_active = False
         self.chunk_buffer = []
         self.chunk_duration = 2.0  # Process chunks every 2 seconds
+        self.last_chunk_time = None
         
     def start_continuous(self, device_index: Optional[int] = None) -> None:
         if self.continuous_active:
@@ -243,12 +248,10 @@ class ContinuousCapture(AudioCapture):
             
         self.continuous_active = True
         self.chunk_buffer = []
+        self.last_chunk_time = time.time()
         
-        # Start recording with chunk callback
-        self.start_recording(
-            device_index=device_index,
-            callback=self._process_chunk
-        )
+        # Start recording with our custom continuous loop
+        self._start_continuous_recording(device_index)
         logger.info("Continuous capture started")
         
     def stop_continuous(self) -> None:
@@ -261,28 +264,78 @@ class ContinuousCapture(AudioCapture):
         if self.chunk_buffer:
             audio_chunk = np.concatenate(self.chunk_buffer)
             if self.chunk_callback and len(audio_chunk) > 0:
+                duration = len(audio_chunk) / self.sample_rate
+                logger.info(f"Processing final chunk: {duration:.1f}s")
                 self.chunk_callback(audio_chunk)
             self.chunk_buffer = []
             
         self.stop_recording()
         logger.info("Continuous capture stopped")
         
-    def _process_chunk(self, audio_data: np.ndarray) -> None:
-        """Process audio chunks for real-time transcription"""
-        if not self.continuous_active:
+    def _start_continuous_recording(self, device_index: Optional[int] = None) -> None:
+        """Start continuous recording with periodic chunk processing"""
+        if self.is_recording:
             return
             
-        # Add to buffer
-        self.chunk_buffer.append(audio_data)
-        
-        # Calculate buffer duration
-        buffer_samples = sum(len(chunk) for chunk in self.chunk_buffer)
-        buffer_duration = buffer_samples / self.sample_rate
-        
-        # Process if we have enough audio
-        if buffer_duration >= self.chunk_duration:
-            audio_chunk = np.concatenate(self.chunk_buffer)
-            self.chunk_buffer = []
+        try:
+            # Open audio stream
+            self.stream = self.audio.open(
+                format=pyaudio.paInt16,
+                channels=self.channels,
+                rate=self.sample_rate,
+                input=True,
+                input_device_index=device_index,
+                frames_per_buffer=self.chunk_size
+            )
             
-            if self.chunk_callback:
-                self.chunk_callback(audio_chunk)
+            self.is_recording = True
+            self.stop_event.clear()
+            self.recording_buffer = []
+            
+            # Start continuous capture thread
+            self.capture_thread = Thread(
+                target=self._continuous_capture_loop
+            )
+            self.capture_thread.start()
+            
+            logger.info(f"Started continuous recording on device {device_index}")
+            
+        except Exception as e:
+            logger.error(f"Failed to start continuous recording: {e}")
+            raise
+            
+    def _continuous_capture_loop(self) -> None:
+        """Continuous capture loop that processes chunks periodically"""
+        while not self.stop_event.is_set() and self.continuous_active:
+            try:
+                # Read audio chunk
+                if self.stream and self.stream.is_active():
+                    audio_chunk = self.stream.read(
+                        self.chunk_size,
+                        exception_on_overflow=False
+                    )
+                    
+                    # Convert to numpy
+                    audio_np = np.frombuffer(audio_chunk, dtype=np.int16)
+                    
+                    # Store in buffer
+                    self.recording_buffer.append(audio_np)
+                    self.chunk_buffer.append(audio_np)
+                    
+                    # Check if it's time to process a chunk
+                    current_time = time.time()
+                    if current_time - self.last_chunk_time >= self.chunk_duration:
+                        if self.chunk_buffer:
+                            audio_to_process = np.concatenate(self.chunk_buffer)
+                            duration = len(audio_to_process) / self.sample_rate
+                            
+                            if duration >= 0.5:  # Only process if we have at least 0.5s
+                                logger.info(f"Processing chunk: {duration:.1f}s")
+                                if self.chunk_callback:
+                                    self.chunk_callback(audio_to_process)
+                                    
+                            self.chunk_buffer = []
+                            self.last_chunk_time = current_time
+                            
+            except Exception as e:
+                logger.error(f"Error in continuous capture loop: {e}")

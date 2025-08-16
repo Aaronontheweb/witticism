@@ -102,7 +102,9 @@ class TranscriptionPipeline:
                     self.result_queue.put(text)
                     
             except Exception as e:
-                if "Empty" not in str(e):  # Ignore queue empty exceptions
+                # Only log real errors, not queue timeouts
+                import queue
+                if not isinstance(e, queue.Empty):
                     logger.error(f"Pipeline processing error: {e}")
 
 
