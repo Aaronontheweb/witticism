@@ -68,9 +68,7 @@ fi
 echo "📦 Downloading and installing updates..."
 echo "⏳ This may take several minutes for large dependencies"
 echo ""
-pipx upgrade witticism --verbose --pip-args="--index-url $INDEX_URL" \
-    --pip-args="--extra-index-url https://pypi.org/simple" \
-    --pip-args="--verbose"
+pipx upgrade witticism --verbose --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple --verbose"
 
 # Restore settings
 if [ -f "$HOME/.config/witticism/config.yaml.backup" ]; then
