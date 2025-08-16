@@ -38,9 +38,7 @@ fi
 echo "📦 Installing Witticism with dependencies..."
 echo "⏳ This may take several minutes as PyTorch and WhisperX are large packages"
 echo ""
-pipx install witticism --verbose --pip-args="--index-url $INDEX_URL" \
-    --pip-args="--extra-index-url https://pypi.org/simple" \
-    --pip-args="--verbose"
+pipx install witticism --verbose --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple --verbose"
 
 # 4. Set up auto-start
 echo "Setting up auto-start..."

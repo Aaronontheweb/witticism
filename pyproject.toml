@@ -25,8 +25,8 @@ classifiers = [
 ]
 dependencies = [
     "whisperx>=3.1.0",
-    "torch>=2.0.0",
-    "torchaudio>=2.0.0",
+    "torch>=2.0.0,<2.4.0",  # Cap at 2.4 for GTX 10xx GPU compatibility
+    "torchaudio>=2.0.0,<2.4.0",
     "PyQt5>=5.15.0",
     "pyaudio>=0.2.11",
     "pynput>=1.7.0",
