@@ -12,7 +12,7 @@ if command -v witticism &> /dev/null; then
     echo "Current version: $CURRENT_VERSION"
 else
     echo "Witticism not installed. Running installer..."
-    curl -sSL https://raw.githubusercontent.com/Aaronontheweb/witticism/main/install.sh | bash
+    curl -sSL https://raw.githubusercontent.com/Aaronontheweb/witticism/master/install.sh | bash
     exit 0
 fi
 
