@@ -8,10 +8,13 @@ echo "🎙️ Installing Witticism..."
 
 # 1. Install pipx if not present
 if ! command -v pipx &> /dev/null; then
-    echo "Installing pipx..."
+    echo "📦 Installing pipx package manager..."
     python3 -m pip install --user pipx
     python3 -m pipx ensurepath
     export PATH="$HOME/.local/bin:$PATH"
+    echo "✓ pipx installed"
+else
+    echo "✓ pipx already installed"
 fi
 
 # 2. Detect GPU and install with right CUDA
@@ -32,9 +35,12 @@ else
 fi
 
 # 3. Install Witticism
-echo "Installing Witticism..."
-pipx install witticism --pip-args="--index-url $INDEX_URL" \
-    --pip-args="--extra-index-url https://pypi.org/simple"
+echo "📦 Installing Witticism with dependencies..."
+echo "⏳ This may take several minutes as PyTorch and WhisperX are large packages"
+echo ""
+pipx install witticism --verbose --pip-args="--index-url $INDEX_URL" \
+    --pip-args="--extra-index-url https://pypi.org/simple" \
+    --pip-args="--verbose"
 
 # 4. Set up auto-start
 echo "Setting up auto-start..."
