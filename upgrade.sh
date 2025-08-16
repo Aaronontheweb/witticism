@@ -65,8 +65,12 @@ else
 fi
 
 # Upgrade with pipx
-pipx upgrade witticism --pip-args="--index-url $INDEX_URL" \
-    --pip-args="--extra-index-url https://pypi.org/simple"
+echo "📦 Downloading and installing updates..."
+echo "⏳ This may take several minutes for large dependencies"
+echo ""
+pipx upgrade witticism --verbose --pip-args="--index-url $INDEX_URL" \
+    --pip-args="--extra-index-url https://pypi.org/simple" \
+    --pip-args="--verbose"
 
 # Restore settings
 if [ -f "$HOME/.config/witticism/config.yaml.backup" ]; then
