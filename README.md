@@ -17,7 +17,7 @@ Built to solve GPU acceleration issues with whisper.cpp. WhisperX provides:
 One-command installation with automatic GPU detection and auto-start:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/Aaronontheweb/witticism/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/Aaronontheweb/witticism/master/install.sh | bash
 ```
 
 This will:
@@ -75,7 +75,7 @@ pipx upgrade witticism
 
 Or use the upgrade script:
 ```bash
-curl -sSL https://raw.githubusercontent.com/Aaronontheweb/witticism/main/upgrade.sh | bash
+curl -sSL https://raw.githubusercontent.com/Aaronontheweb/witticism/master/upgrade.sh | bash
 ```
 
 ## Usage
