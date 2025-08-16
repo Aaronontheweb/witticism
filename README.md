@@ -4,8 +4,6 @@
 
 WhisperX-powered voice transcription tool that types text directly at your cursor position. Hold F9 to record, release to transcribe.
 
-**Created by [Aaron Stannard](https://aaronstannard.com/)**
-
 ## ✨ Features
 
 - **🚀 One-Command Install** - Automatic GPU detection and configuration
