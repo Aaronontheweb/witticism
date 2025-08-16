@@ -227,7 +227,9 @@ class SystemTrayApp(QSystemTrayIcon):
                 
             action.setData(model)  # Store actual model name
             action.setCheckable(True)
-            if model == "base":  # Default
+            # Check the currently selected model from config
+            current_model = self.config_manager.get("model.size", "base") if self.config_manager else "base"
+            if model == current_model:
                 action.setChecked(True)
             action.triggered.connect(lambda checked, m=model: self.change_model(m))
             self.model_menu.addAction(action)
@@ -349,6 +351,10 @@ class SystemTrayApp(QSystemTrayIcon):
                 
             self.set_status(f"Loading {model_name}...")
             self.engine.change_model(model_name)
+            
+            # Save the model selection to config
+            if self.config_manager:
+                self.config_manager.set("model.size", model_name)
             
             # Recreate continuous transcriber with new engine
             if hasattr(self, 'continuous_transcriber'):
