@@ -93,10 +93,12 @@ To upgrade to the latest version:
 pipx upgrade witticism
 ```
 
-Or use the upgrade script:
+Or use the upgrade script (recommended):
 ```bash
 curl -sSL https://raw.githubusercontent.com/Aaronontheweb/witticism/master/upgrade.sh | bash
 ```
+
+**Note**: The upgrade script will automatically stop any running Witticism instance during the upgrade and restart it afterward if auto-start is configured.
 
 ## Usage
 
