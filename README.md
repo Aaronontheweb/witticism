@@ -1,30 +1,47 @@
 # Witticism
 
+🎙️ **One-command install. Zero configuration. Just works.**
+
 WhisperX-powered voice transcription tool that types text directly at your cursor position. Hold F9 to record, release to transcribe.
+
+**Created by [Aaron Stannard](https://aaronstannard.com/)**
+
+## ✨ Features
+
+- **🚀 One-Command Install** - Automatic GPU detection and configuration
+- **🎮 True GPU Acceleration** - Full CUDA support, even for older GPUs (GTX 10xx series)
+- **⚡ Instant Transcription** - Press F9, speak, release. Text appears at cursor
+- **🔄 Continuous Dictation Mode** - Toggle on for hands-free transcription
+- **🎯 System Tray Integration** - Runs quietly in background, always ready
+- **📦 No Configuration** - Works out of the box with smart defaults
+- **🔧 Auto-Updates** - Built-in upgrade command keeps you current
 
 ## Why Witticism?
 
-Built to solve GPU acceleration issues with whisper.cpp. WhisperX provides:
-- Proper CUDA/GPU support for faster transcription
-- Word-level timestamps and alignment
+Built to solve real GPU acceleration issues with whisper.cpp. WhisperX provides:
+- Proper CUDA/GPU support for faster transcription (2-10x faster than CPU)
+- Word-level timestamps and alignment for accuracy
 - Better accuracy with less latency
-- Native Python integration
+- Native Python integration that actually works
 
 ## Installation
 
-### Quick Install (Recommended)
+### 🚀 Quick Install (Recommended)
 
-One-command installation with automatic GPU detection and auto-start:
+**Just run this one command:**
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/Aaronontheweb/witticism/master/install.sh | bash
 ```
 
-This will:
-- ✅ Detect your GPU and install the right CUDA version
-- ✅ Set up Witticism to start automatically on login
+**That's it!** The installer will:
+- ✅ Detect your GPU automatically (GTX 1080, RTX 3090, etc.)
+- ✅ Install the right CUDA/PyTorch versions
+- ✅ Set up auto-start on login
 - ✅ Configure the system tray icon
-- ✅ Install all dependencies in an isolated environment
+- ✅ Handle all dependencies in an isolated environment
+
+**No Python knowledge required. No CUDA configuration. It just works.**
 
 ### Manual Installation
 
@@ -85,7 +102,12 @@ curl -sSL https://raw.githubusercontent.com/Aaronontheweb/witticism/master/upgra
 1. The app runs in your system tray (green "W" icon)
 2. **Hold F9** to start recording
 3. **Release F9** to stop and transcribe
-4. Text appears at your cursor position
+4. Text appears instantly at your cursor position
+
+**Or use Continuous Mode:**
+- Toggle continuous dictation from the tray menu
+- Speak naturally - transcription happens automatically
+- Perfect for long-form writing
 
 ### System Tray Menu
 
@@ -167,6 +189,10 @@ src/witticism/
 │   └── logging_config.py
 └── main.py         # Entry point
 ```
+
+## Author
+
+Created by [Aaron Stannard](https://aaronstannard.com/)
 
 ## License
 
