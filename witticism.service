@@ -1,0 +1,17 @@
+[Unit]
+Description=Witticism Voice Transcription Service
+After=graphical-session.target
+
+[Service]
+Type=simple
+User=aaronontheweb
+WorkingDirectory=/home/aaronontheweb/repositories/ai-playground/witticism
+Environment="PYTHONPATH=/home/aaronontheweb/repositories/ai-playground/witticism/src"
+Environment="DISPLAY=:0"
+Environment="XAUTHORITY=/home/aaronontheweb/.Xauthority"
+ExecStart=/home/aaronontheweb/repositories/ai-playground/witticism/venv/bin/python /home/aaronontheweb/repositories/ai-playground/witticism/src/witticism/main.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
