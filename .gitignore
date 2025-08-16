@@ -216,3 +216,6 @@ build/
 
 # Auto-generated version file
 src/witticism/_version.py
+
+# Claude worktree management
+.claude-wt/worktrees
