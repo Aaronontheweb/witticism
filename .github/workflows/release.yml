@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 0.2.0)'
+        required: true
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install build tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install build twine
+    
+    - name: Build package
+      run: python -m build
+    
+    - name: Publish to PyPI
+      if: startsWith(github.ref, 'refs/tags/v')
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+      run: |
+        twine upload dist/*
+    
+    - name: Create GitHub Release
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          dist/*
+          install.sh
+          upgrade.sh
+        body: |
+          ## Installation
+          
+          ### Quick Install (Linux)
+          ```bash
+          curl -sSL https://raw.githubusercontent.com/Aaronontheweb/witticism/${{ github.ref_name }}/install.sh | bash
+          ```
+          
+          ### Upgrade
+          ```bash
+          curl -sSL https://raw.githubusercontent.com/Aaronontheweb/witticism/${{ github.ref_name }}/upgrade.sh | bash
+          ```
+          
+          ### Manual Install
+          ```bash
+          pipx install witticism==${{ github.ref_name }}
+          ```
+          
+          ## What's Changed
+          See [CHANGELOG.md](https://github.com/Aaronontheweb/witticism/blob/${{ github.ref_name }}/CHANGELOG.md)
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+

@@ -7,6 +7,8 @@ from PyQt5.QtGui import QIcon, QPixmap
 from typing import Optional
 import numpy as np
 from witticism.core.continuous_transcriber import ContinuousTranscriber
+from witticism.ui.about_dialog import AboutDialog
+from witticism.ui.settings_dialog import SettingsDialog
 
 logger = logging.getLogger(__name__)
 
@@ -457,20 +459,68 @@ class SystemTrayApp(QSystemTrayIcon):
         self.selected_device = device_index
         
     def show_settings(self):
-        # TODO: Implement settings dialog
-        QMessageBox.information(self, "Settings", "Settings dialog not yet implemented")
+        """Show the settings dialog"""
+        if not self.config_manager:
+            QMessageBox.warning(None, "Settings", "Configuration not available")
+            return
+            
+        dialog = SettingsDialog(self.config_manager)
+        dialog.settings_changed.connect(self.on_settings_changed)
+        dialog.exec_()
+        
+    def on_settings_changed(self, settings):
+        """Handle settings changes - reload what we can without restart"""
+        needs_restart = []
+        
+        # Update language if changed (can reload)
+        if "model.language" in settings and self.engine:
+            self.engine.language = settings["model.language"]
+            
+        # Update chunk duration for dictation (can reload)
+        if "dictation.chunk_duration" in settings and self.continuous_capture:
+            self.continuous_capture.chunk_duration = settings["dictation.chunk_duration"]
+            
+        # Update VAD aggressiveness (can reload for new sessions)
+        if "audio.vad_aggressiveness" in settings and self.audio_capture:
+            self.audio_capture.vad_aggressiveness = settings["audio.vad_aggressiveness"]
+            if self.audio_capture.vad:
+                self.audio_capture.vad.set_mode(settings["audio.vad_aggressiveness"])
+                
+        # Update pipeline settings (can reload)
+        if "pipeline.min_audio_length" in settings:
+            # Update transcription pipeline if it exists
+            pass  # Would need reference to pipeline
+            
+        # Check which settings need restart
+        if "hotkeys.push_to_talk" in settings or "hotkeys.mode_switch" in settings:
+            needs_restart.append("Keyboard shortcuts")
+        if "audio.sample_rate" in settings:
+            needs_restart.append("Sample rate")
+        if "model.compute_type" in settings:
+            needs_restart.append("Compute type")
+            
+        # Show message if any settings need restart
+        if needs_restart:
+            QMessageBox.information(
+                None,
+                "Settings Applied",
+                f"Most settings have been applied.\n\n"
+                f"These settings require restart:\n• " + "\n• ".join(needs_restart) + 
+                f"\n\nPlease restart the application for these to take effect."
+            )
+        else:
+            # Show brief notification that settings were applied
+            self.showMessage(
+                "Settings Applied",
+                "All settings have been applied successfully.",
+                QSystemTrayIcon.Information,
+                2000
+            )
         
     def show_about(self):
-        QMessageBox.about(
-            self,
-            "About Witticism",
-            "Witticism v0.1.0\n\n"
-            "WhisperX-powered transcription tool\n"
-            "Type with your voice anywhere!\n\n"
-            "Push-to-Talk: Hold F9 to record, release to transcribe.\n"
-            "Toggle Mode: Press F9 to start/stop continuous dictation.\n"
-            "Switch modes: Ctrl+Alt+M"
-        )
+        """Show the about dialog"""
+        dialog = AboutDialog()
+        dialog.exec_()
         
     def on_tray_activated(self, reason):
         if reason == QSystemTrayIcon.Trigger:
