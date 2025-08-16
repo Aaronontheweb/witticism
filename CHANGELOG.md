@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2025-08-16
+
+### Fixed
+- Model persistence across application restarts - selected model now saves and loads correctly
+- CI linting warnings and enforcement of code quality checks
+
+### Improved
+- CI test discovery to run all unit tests automatically
+- Code quality with comprehensive linting checks
+
 ## [0.2.0] - 2025-08-16
 
 ### Added
@@ -43,6 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Audio device selection
 - Configuration persistence
 
-[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/Aaronontheweb/witticism/compare/v0.2.0...v0.2.2
 [0.2.0]: https://github.com/Aaronontheweb/witticism/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Aaronontheweb/witticism/releases/tag/v0.1.0
