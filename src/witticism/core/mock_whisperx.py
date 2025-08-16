@@ -18,7 +18,7 @@ class MockWhisperXModel:
         self.compute_type = compute_type
         self.language = language
         logger.info(f"Mock WhisperX model initialized: {model_size} on {device}")
-        
+
     def transcribe(self, audio: np.ndarray, **kwargs) -> Dict[str, Any]:
         # Simulate processing delay based on model size
         delays = {
@@ -30,13 +30,13 @@ class MockWhisperXModel:
             "medium": 2.0,
             "large-v3": 3.0
         }
-        
+
         delay = delays.get(self.model_size, 1.0)
         time.sleep(delay)
-        
+
         # Generate mock transcription
         duration = len(audio) / 16000  # Assuming 16kHz
-        
+
         return {
             "segments": [
                 {
@@ -66,7 +66,7 @@ class DiarizationPipeline:
     def __init__(self, use_auth_token: str, device: str):
         self.device = device
         logger.info("Mock diarization pipeline initialized")
-        
+
     def __call__(self, audio: np.ndarray) -> list:
         return []
 

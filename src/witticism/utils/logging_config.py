@@ -11,26 +11,26 @@ def setup_logging(
     console: bool = True
 ) -> None:
     log_level = getattr(logging, level.upper(), logging.INFO)
-    
+
     # Root logger configuration
     root_logger = logging.getLogger()
     root_logger.setLevel(log_level)
-    
+
     # Clear existing handlers
     root_logger.handlers = []
-    
+
     # Format
     formatter = logging.Formatter(
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
-    
+
     # Console handler
     if console:
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setFormatter(formatter)
         root_logger.addHandler(console_handler)
-    
+
     # File handler
     if log_file:
         log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -41,7 +41,7 @@ def setup_logging(
         )
         file_handler.setFormatter(formatter)
         root_logger.addHandler(file_handler)
-    
+
     # Suppress some noisy loggers
     logging.getLogger("pynput").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
