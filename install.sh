@@ -6,6 +6,30 @@ set -e
 
 echo "🎙️ Installing Witticism..."
 
+# Install system dependencies for pyaudio
+if command -v apt-get &> /dev/null; then
+    # Debian/Ubuntu
+    echo "📦 Installing system dependencies..."
+    if ! dpkg -l | grep -q portaudio19-dev; then
+        echo "Installing PortAudio development headers (required for voice input)..."
+        sudo apt-get update && sudo apt-get install -y portaudio19-dev
+    fi
+elif command -v dnf &> /dev/null; then
+    # Fedora/RHEL
+    echo "📦 Installing system dependencies..."
+    if ! rpm -qa | grep -q portaudio-devel; then
+        echo "Installing PortAudio development headers (required for voice input)..."
+        sudo dnf install -y portaudio-devel
+    fi
+elif command -v pacman &> /dev/null; then
+    # Arch Linux
+    echo "📦 Installing system dependencies..."
+    if ! pacman -Q portaudio &> /dev/null; then
+        echo "Installing PortAudio (required for voice input)..."
+        sudo pacman -S --noconfirm portaudio
+    fi
+fi
+
 # 1. Install pipx if not present
 if ! command -v pipx &> /dev/null; then
     echo "📦 Installing pipx package manager..."
