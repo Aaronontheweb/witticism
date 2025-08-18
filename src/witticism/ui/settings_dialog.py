@@ -1,11 +1,9 @@
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-                             QPushButton, QComboBox, QSpinBox, QSlider,
+                             QComboBox, QSlider,
                              QGroupBox, QFormLayout, QKeySequenceEdit,
-                             QDialogButtonBox, QDoubleSpinBox, QMessageBox)
+                             QDialogButtonBox, QDoubleSpinBox)
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QKeySequence
-import sys
-import os
 
 class SettingsDialog(QDialog):
     settings_changed = pyqtSignal(dict)

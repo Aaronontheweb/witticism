@@ -6,7 +6,7 @@ This allows us to test the application structure and UI without GPU dependencies
 import logging
 import time
 import numpy as np
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any, Tuple
 
 logger = logging.getLogger(__name__)
 

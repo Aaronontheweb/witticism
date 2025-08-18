@@ -1,7 +1,6 @@
 import logging
 from pynput import keyboard
-from threading import Thread
-from typing import Optional, Callable, Dict
+from typing import Optional, Callable
 
 logger = logging.getLogger(__name__)
 

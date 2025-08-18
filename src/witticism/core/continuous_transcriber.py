@@ -3,7 +3,7 @@ import numpy as np
 from threading import Thread, Event
 from queue import Queue
 import time
-from typing import Optional, Callable
+from typing import Callable
 
 logger = logging.getLogger(__name__)
 
