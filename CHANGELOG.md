@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2025-08-18
+
+### Added
+- Automatic CUDA error recovery after suspend/resume cycles
+- Visual indicators for CPU fallback mode (orange tray icon)
+- System notifications when GPU errors occur
+- GPU error status in system tray menu
+
+### Fixed
+- CUDA context becoming invalid after laptop suspend/resume
+- Transcription failures due to GPU errors now automatically fall back to CPU
+
+### Improved
+- Better error handling and recovery for GPU-related issues
+- Clear user feedback about performance degradation when running on CPU
+- Informative tooltips and status messages indicating current device mode
+
 ## [0.2.2] - 2025-08-16
 
 ### Fixed

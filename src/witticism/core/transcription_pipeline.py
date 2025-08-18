@@ -1,6 +1,6 @@
 import logging
 import numpy as np
-from typing import Optional, Dict, Any, Callable
+from typing import Optional, Callable
 from queue import Queue
 from threading import Thread, Event
 import time

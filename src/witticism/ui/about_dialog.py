@@ -2,8 +2,8 @@ import sys
 from pathlib import Path
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QTextBrowser, QTabWidget, QWidget)
-from PyQt5.QtCore import Qt, QSize
-from PyQt5.QtGui import QPixmap, QFont, QIcon
+from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QPixmap, QFont
 import importlib.metadata
 
 class AboutDialog(QDialog):

@@ -1,8 +1,7 @@
 import logging
 import time
-from pynput.keyboard import Controller, Key
+from pynput.keyboard import Controller
 import pyperclip
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
