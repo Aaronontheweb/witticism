@@ -69,13 +69,13 @@ class SystemTrayApp(QSystemTrayIcon):
         self.gpu_status_action.setEnabled(False)
         self.gpu_status_action.setVisible(False)  # Hidden by default
         self.menu.addAction(self.gpu_status_action)
-        
+
         # Loading progress action (only shown during model loading)
         self.loading_progress_action = QAction("Loading: 0%")
         self.loading_progress_action.setEnabled(False)
         self.loading_progress_action.setVisible(False)  # Hidden by default
         self.menu.addAction(self.loading_progress_action)
-        
+
         # Cancel loading action (only shown during model loading)
         self.cancel_loading_action = QAction("Cancel Loading")
         self.cancel_loading_action.triggered.connect(self.cancel_model_loading)
@@ -426,16 +426,16 @@ class SystemTrayApp(QSystemTrayIcon):
                 self.stop_dictation()
 
             self.set_status(f"Loading {model_name}...")
-            
+
             # Show loading progress UI
             self.loading_progress_action.setVisible(True)
             self.cancel_loading_action.setVisible(True)
-            
+
             try:
                 # Use progress callback and timeout (2 minutes for smaller models, 5 for larger)
                 timeout = 120 if model_name in ["tiny", "tiny.en", "base", "base.en"] else 300
                 self.engine.change_model(model_name, self.on_loading_progress, timeout)
-                
+
                 # Save the model selection to config
                 if self.config_manager:
                     self.config_manager.set("model.size", model_name)
@@ -446,7 +446,7 @@ class SystemTrayApp(QSystemTrayIcon):
                     del self.continuous_transcriber
 
                 self.set_status("Ready")
-                
+
             except TimeoutError as e:
                 logger.error(f"Model loading timed out: {e}")
                 self.set_status("Model loading timed out")
