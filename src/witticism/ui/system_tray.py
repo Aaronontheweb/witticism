@@ -1,11 +1,9 @@
 import logging
-import sys
 from pathlib import Path
 from PyQt5.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QAction, QMessageBox
-from PyQt5.QtCore import QObject, pyqtSignal, QThread, Qt, QTimer
+from PyQt5.QtCore import pyqtSignal, QThread, Qt, QTimer
 from PyQt5.QtGui import QIcon, QPixmap
 from typing import Optional
-import numpy as np
 from witticism.core.continuous_transcriber import ContinuousTranscriber
 from witticism.ui.about_dialog import AboutDialog
 from witticism.ui.settings_dialog import SettingsDialog
