@@ -49,6 +49,7 @@ class SystemTrayApp(QSystemTrayIcon):
         self.is_enabled = True
         self.is_dictating = False  # For toggle mode
         self.mode = "push_to_talk"  # "push_to_talk" or "toggle"
+        self.cuda_error_shown = False  # Track if we've shown CUDA error notification
 
         self.init_ui()
         self.set_status("Ready")
@@ -64,6 +65,12 @@ class SystemTrayApp(QSystemTrayIcon):
         self.status_action = QAction("Status: Ready")
         self.status_action.setEnabled(False)
         self.menu.addAction(self.status_action)
+        
+        # GPU status action (only shown when there's a CUDA error)
+        self.gpu_status_action = QAction("⚠ GPU Error - Restart Required")
+        self.gpu_status_action.setEnabled(False)
+        self.gpu_status_action.setVisible(False)  # Hidden by default
+        self.menu.addAction(self.gpu_status_action)
 
         self.menu.addSeparator()
 
@@ -158,7 +165,8 @@ class SystemTrayApp(QSystemTrayIcon):
             "green": QColor(76, 175, 80),
             "red": QColor(244, 67, 54),
             "yellow": QColor(255, 193, 7),
-            "gray": QColor(158, 158, 158)
+            "gray": QColor(158, 158, 158),
+            "orange": QColor(255, 152, 0)  # Orange for CUDA fallback
         }
 
         # Background circle
@@ -261,22 +269,43 @@ class SystemTrayApp(QSystemTrayIcon):
                 self.device_menu.addAction(action)
 
     def set_status(self, status: str):
-        self.status_action.setText(f"Status: {status}")
-        self.setToolTip(f"Witticism - {status}")
-
-        # Update icon color based on status
-        if "Ready" in status:
-            self.update_icon_color("green")
-        elif "Recording" in status:
-            self.update_icon_color("red")
-        elif "Dictating" in status:
-            self.update_icon_color("red")  # Red for active dictation
-        elif "Transcribing" in status:
-            self.update_icon_color("yellow")
-        elif "Disabled" in status:
-            self.update_icon_color("gray")
+        # Check if we're in CUDA fallback mode
+        if self.engine and hasattr(self.engine, 'cuda_fallback') and self.engine.cuda_fallback:
+            if "Ready" in status:
+                status = "Ready (CPU Mode - CUDA Error)"
+                self.setToolTip("Witticism (CPU Mode - Restart for GPU)")
+            else:
+                self.setToolTip(f"Witticism - {status} (CPU Mode)")
         else:
-            self.update_icon_color("green")
+            self.setToolTip(f"Witticism - {status}")
+        
+        self.status_action.setText(f"Status: {status}")
+
+        # Update icon color based on status and CUDA fallback
+        if self.engine and hasattr(self.engine, 'cuda_fallback') and self.engine.cuda_fallback:
+            # Orange for CPU fallback mode
+            if "Ready" in status:
+                self.update_icon_color("orange")
+            elif "Recording" in status or "Dictating" in status:
+                self.update_icon_color("red")
+            elif "Transcribing" in status:
+                self.update_icon_color("yellow")
+            else:
+                self.update_icon_color("orange")
+        else:
+            # Normal colors
+            if "Ready" in status:
+                self.update_icon_color("green")
+            elif "Recording" in status:
+                self.update_icon_color("red")
+            elif "Dictating" in status:
+                self.update_icon_color("red")  # Red for active dictation
+            elif "Transcribing" in status:
+                self.update_icon_color("yellow")
+            elif "Disabled" in status:
+                self.update_icon_color("gray")
+            else:
+                self.update_icon_color("green")
 
     def toggle_enabled(self):
         self.is_enabled = not self.is_enabled
@@ -337,6 +366,44 @@ class SystemTrayApp(QSystemTrayIcon):
     def on_transcription_error(self, error):
         self.set_status("Error")
         logger.error(f"Transcription error: {error}")
+        
+        # Check if this is a CUDA error and we've fallen back
+        if "CUDA" in str(error) and self.engine and hasattr(self.engine, 'cuda_fallback'):
+            if self.engine.cuda_fallback and not self.cuda_error_shown:
+                # Show GPU error notification once per session
+                self.show_cuda_error_notification()
+                self.cuda_error_shown = True
+                
+                # Show GPU status in menu
+                self.gpu_status_action.setVisible(True)
+                
+                # Update status to reflect CPU mode
+                self.set_status("Ready")
+    
+    def show_cuda_error_notification(self):
+        """Show a system tray notification about CUDA error and CPU fallback."""
+        if self.supportsMessages():
+            self.showMessage(
+                "GPU Error Detected",
+                "Transcription falling back to CPU mode.\n"
+                "Performance may be reduced.\n"
+                "Restart computer to restore GPU acceleration.",
+                QSystemTrayIcon.Warning,
+                10000  # Show for 10 seconds
+            )
+        else:
+            # Fallback to message box if system doesn't support tray messages
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Warning)
+            msg.setWindowTitle("GPU Error Detected")
+            msg.setText("Transcription is running in CPU mode due to a GPU error.")
+            msg.setInformativeText(
+                "Performance may be reduced (2-3x slower).\n\n"
+                "This typically occurs after suspend/resume.\n"
+                "Restart your computer to restore GPU acceleration."
+            )
+            msg.setStandardButtons(QMessageBox.Ok)
+            msg.exec_()
 
     def change_model(self, model_name: str):
         # Uncheck all other models
@@ -552,6 +619,18 @@ class SystemTrayApp(QSystemTrayIcon):
 
     def set_components(self, engine, audio_capture, hotkey_manager, output_manager, config_manager):
         self.engine = engine
+        
+        # Check if engine is in CUDA fallback mode on startup
+        if engine and hasattr(engine, 'cuda_fallback') and engine.cuda_fallback:
+            # Show GPU status in menu
+            self.gpu_status_action.setVisible(True)
+            # Update status to show CPU mode
+            self.set_status("Ready")
+            # Show notification if not already shown
+            if not self.cuda_error_shown:
+                QTimer.singleShot(1000, self.show_cuda_error_notification)
+                self.cuda_error_shown = True
+        
         self.audio_capture = audio_capture
         self.hotkey_manager = hotkey_manager
         self.output_manager = output_manager
