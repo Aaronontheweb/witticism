@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4] - 2025-08-18
+
 ### Added
 - Model loading progress indicators with percentage and status updates
 - Configurable timeouts for model loading (2 min for small, 5 min for large models)
@@ -82,7 +84,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Audio device selection
 - Configuration persistence
 
-[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/v0.2.4...HEAD
+[0.2.4]: https://github.com/Aaronontheweb/witticism/compare/v0.2.3...v0.2.4
+[0.2.3]: https://github.com/Aaronontheweb/witticism/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/Aaronontheweb/witticism/compare/v0.2.0...v0.2.2
 [0.2.0]: https://github.com/Aaronontheweb/witticism/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Aaronontheweb/witticism/releases/tag/v0.1.0
