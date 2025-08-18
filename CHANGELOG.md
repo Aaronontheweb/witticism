@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Model loading progress indicators with percentage and status updates
+- Configurable timeouts for model loading (2 min for small, 5 min for large models)
+- Automatic fallback to smaller model when loading times out
+- Cancel loading functionality via system tray menu
+- Real-time progress display in tray tooltips and menu
+
+### Improved
+- User experience during model downloads with visibility into progress
+- Responsiveness during model loading using threaded operations
+- Control over stuck or slow model downloads with cancellation support
+
 ## [0.2.3] - 2025-08-18
 
 ### Added

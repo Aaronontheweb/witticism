@@ -1,6 +1,8 @@
 import logging
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, Callable
 import numpy as np
+import threading
+import time
 
 # Try to import WhisperX, fall back to mock if not available
 try:
@@ -72,10 +74,76 @@ class WhisperXEngine:
         self.metadata = None
         self.diarize_model = None
 
+        # Progress tracking
+        self.loading_progress = 0
+        self.loading_status = "Not loaded"
+        self.progress_callback = None
+        self.loading_thread = None
+        self.loading_cancelled = False
+
+        # Model fallback support
+        self.available_models = ["tiny", "tiny.en", "base", "base.en", "small", "small.en"]
+        self.fallback_model = "base"  # Safe fallback model
+
         logger.info(f"WhisperX Engine initialized: device={self.device}, compute_type={self.compute_type}")
 
-    def load_models(self) -> None:
+    def load_models(self, progress_callback: Optional[Callable[[str, int], None]] = None, timeout: Optional[float] = 300) -> None:
+        """Load models with progress tracking and timeout support.
+
+        Args:
+            progress_callback: Function to call with (status_text, progress_percent) updates
+            timeout: Timeout in seconds (default: 5 minutes)
+        """
+        self.progress_callback = progress_callback
+        self.loading_cancelled = False
+
+        if timeout and timeout > 0:
+            # Load with timeout in separate thread
+            self.loading_thread = threading.Thread(target=self._load_models_with_timeout, args=(timeout,))
+            self.loading_thread.daemon = True
+            self.loading_thread.start()
+            self.loading_thread.join(timeout)
+
+            if self.loading_thread.is_alive():
+                self.loading_cancelled = True
+                logger.warning(f"Model loading timed out after {timeout}s, attempting fallback")
+                self._update_progress("Loading timed out, trying fallback...", 0)
+
+                # Try fallback model
+                if self.model_size != self.fallback_model:
+                    logger.info(f"Falling back to {self.fallback_model} model")
+                    original_model = self.model_size
+                    self.model_size = self.fallback_model
+
+                    try:
+                        self._load_models_sync()
+                        logger.info(f"Successfully loaded fallback model: {self.fallback_model}")
+                        self._update_progress(f"Loaded {self.fallback_model} (fallback)", 100)
+                        return
+                    except Exception as fallback_error:
+                        logger.error(f"Fallback model loading failed: {fallback_error}")
+                        self.model_size = original_model
+                        raise TimeoutError(f"Model loading timed out after {timeout}s and fallback failed")
+                else:
+                    raise TimeoutError(f"Model loading timed out after {timeout}s")
+        else:
+            # Load synchronously without timeout
+            self._load_models_sync()
+
+    def _load_models_with_timeout(self, timeout: float):
+        """Load models in a separate thread for timeout handling."""
         try:
+            self._load_models_sync()
+        except Exception as e:
+            if not self.loading_cancelled:
+                logger.error(f"Model loading failed: {e}")
+                raise
+
+    def _load_models_sync(self):
+        """Synchronous model loading with progress updates."""
+        try:
+            self._update_progress("Loading transcription model...", 10)
+
             # Load main transcription model
             logger.info(f"Loading WhisperX model: {self.model_size}")
             self.model = whisperx.load_model(
@@ -85,12 +153,22 @@ class WhisperXEngine:
                 language=self.language
             )
 
+            if self.loading_cancelled:
+                return
+
+            self._update_progress("Loading alignment model...", 50)
+
             # Load alignment model for word-level timestamps
             logger.info(f"Loading alignment model for language: {self.language}")
             self.align_model, self.metadata = whisperx.load_align_model(
                 language_code=self.language,
                 device=self.device
             )
+
+            if self.loading_cancelled:
+                return
+
+            self._update_progress("Loading diarization model...", 80)
 
             # Optionally load diarization model
             if self.enable_diarization and self.hf_token:
@@ -100,11 +178,34 @@ class WhisperXEngine:
                     device=self.device
                 )
 
+            self._update_progress("Models loaded successfully", 100)
             logger.info("All models loaded successfully")
 
         except Exception as e:
-            logger.error(f"Failed to load models: {e}")
-            raise
+            if not self.loading_cancelled:
+                logger.error(f"Failed to load models: {e}")
+                self._update_progress(f"Loading failed: {str(e)}", 0)
+                raise
+
+    def _update_progress(self, status: str, progress: int):
+        """Update loading progress and status."""
+        self.loading_status = status
+        self.loading_progress = progress
+        if self.progress_callback and not self.loading_cancelled:
+            self.progress_callback(status, progress)
+
+    def cancel_loading(self):
+        """Cancel ongoing model loading."""
+        self.loading_cancelled = True
+        logger.info("Model loading cancelled by user")
+
+    def is_loading(self) -> bool:
+        """Check if models are currently loading."""
+        return self.loading_thread is not None and self.loading_thread.is_alive()
+
+    def get_loading_progress(self) -> Tuple[str, int]:
+        """Get current loading status and progress percentage."""
+        return self.loading_status, self.loading_progress
 
     def transcribe(
         self,
@@ -210,7 +311,6 @@ class WhisperXEngine:
         audio: np.ndarray,
         **kwargs
     ) -> Tuple[Dict[str, Any], float]:
-        import time
         start_time = time.time()
         result = self.transcribe(audio, **kwargs)
         processing_time = time.time() - start_time
@@ -254,10 +354,14 @@ class WhisperXEngine:
                 self.cuda_fallback = True  # Mark that we're in fallback mode
                 self.load_models()
 
-    def change_model(self, model_size: str) -> None:
+    def change_model(self, model_size: str, progress_callback: Optional[Callable[[str, int], None]] = None, timeout: Optional[float] = 300) -> None:
+        """Change the model with progress tracking and timeout support."""
         self.model_size = model_size
         self.model = None
-        self.load_models()
+        self.align_model = None
+        self.diarize_model = None
+        self.metadata = None
+        self.load_models(progress_callback, timeout)
 
     def format_result(self, result: Dict[str, Any]) -> str:
         segments = result.get("segments", [])

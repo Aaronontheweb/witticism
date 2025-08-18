@@ -70,6 +70,18 @@ class SystemTrayApp(QSystemTrayIcon):
         self.gpu_status_action.setVisible(False)  # Hidden by default
         self.menu.addAction(self.gpu_status_action)
 
+        # Loading progress action (only shown during model loading)
+        self.loading_progress_action = QAction("Loading: 0%")
+        self.loading_progress_action.setEnabled(False)
+        self.loading_progress_action.setVisible(False)  # Hidden by default
+        self.menu.addAction(self.loading_progress_action)
+
+        # Cancel loading action (only shown during model loading)
+        self.cancel_loading_action = QAction("Cancel Loading")
+        self.cancel_loading_action.triggered.connect(self.cancel_model_loading)
+        self.cancel_loading_action.setVisible(False)  # Hidden by default
+        self.menu.addAction(self.cancel_loading_action)
+
         self.menu.addSeparator()
 
         # Toggle enable/disable
@@ -414,18 +426,53 @@ class SystemTrayApp(QSystemTrayIcon):
                 self.stop_dictation()
 
             self.set_status(f"Loading {model_name}...")
-            self.engine.change_model(model_name)
 
-            # Save the model selection to config
-            if self.config_manager:
-                self.config_manager.set("model.size", model_name)
+            # Show loading progress UI
+            self.loading_progress_action.setVisible(True)
+            self.cancel_loading_action.setVisible(True)
 
-            # Recreate continuous transcriber with new engine
-            if hasattr(self, 'continuous_transcriber'):
-                self.continuous_transcriber.stop()
-                del self.continuous_transcriber
+            try:
+                # Use progress callback and timeout (2 minutes for smaller models, 5 for larger)
+                timeout = 120 if model_name in ["tiny", "tiny.en", "base", "base.en"] else 300
+                self.engine.change_model(model_name, self.on_loading_progress, timeout)
 
-            self.set_status("Ready")
+                # Save the model selection to config
+                if self.config_manager:
+                    self.config_manager.set("model.size", model_name)
+
+                # Recreate continuous transcriber with new engine
+                if hasattr(self, 'continuous_transcriber'):
+                    self.continuous_transcriber.stop()
+                    del self.continuous_transcriber
+
+                self.set_status("Ready")
+
+            except TimeoutError as e:
+                logger.error(f"Model loading timed out: {e}")
+                self.set_status("Model loading timed out")
+                # Don't change model selection on timeout - keep original
+            except Exception as e:
+                logger.error(f"Model loading failed: {e}")
+                self.set_status(f"Loading failed: {str(e)[:50]}")
+                # Don't change model selection on error - keep original
+            finally:
+                # Hide loading progress UI
+                self.loading_progress_action.setVisible(False)
+                self.cancel_loading_action.setVisible(False)
+
+    def on_loading_progress(self, status: str, progress: int):
+        """Handle model loading progress updates."""
+        self.loading_progress_action.setText(f"Loading: {progress}% - {status}")
+        self.set_status(f"{status} ({progress}%)")
+
+    def cancel_model_loading(self):
+        """Cancel ongoing model loading."""
+        if self.engine and hasattr(self.engine, 'cancel_loading'):
+            self.engine.cancel_loading()
+            self.set_status("Loading cancelled")
+            # Hide loading progress UI
+            self.loading_progress_action.setVisible(False)
+            self.cancel_loading_action.setVisible(False)
 
     def change_mode(self, mode: str):
         """Switch between push-to-talk and toggle modes"""
