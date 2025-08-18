@@ -58,7 +58,7 @@ class WhisperXEngine:
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
         else:
             self.device = device
-        
+
         self.original_device = self.device  # Store original choice
 
         # Auto-select compute type based on device
@@ -162,18 +162,18 @@ class WhisperXEngine:
             if "CUDA" in error_msg and ("launch failure" in error_msg or "invalid device context" in error_msg):
                 logger.warning(f"CUDA error detected (likely from suspend/resume): {e}")
                 logger.info("Attempting to recover by reloading models...")
-                
+
                 # Try to recover by reloading models
                 try:
                     self._recover_from_cuda_error()
-                    
+
                     # Retry transcription
                     logger.info("Retrying transcription after CUDA recovery...")
                     result = self.model.transcribe(
                         audio,
                         **transcribe_kwargs
                     )
-                    
+
                     # Align for word-level timestamps
                     if self.align_model:
                         result = whisperx.align(
@@ -184,7 +184,7 @@ class WhisperXEngine:
                             self.device,
                             return_char_alignments=False
                         )
-                    
+
                     # Apply speaker diarization if enabled
                     if self.enable_diarization and self.diarize_model:
                         diarize_segments = self.diarize_model(audio)
@@ -192,11 +192,11 @@ class WhisperXEngine:
                             diarize_segments,
                             result
                         )
-                    
+
                     logger.info("Successfully recovered from CUDA error")
                     self.cuda_fallback = True  # Mark that we're in fallback mode
                     return result
-                    
+
                 except Exception as recovery_error:
                     logger.error(f"Failed to recover from CUDA error: {recovery_error}")
                     self.cuda_fallback = True  # Mark fallback even if recovery had issues
@@ -228,22 +228,22 @@ class WhisperXEngine:
             self.align_model = None
             self.diarize_model = None
             self.metadata = None
-            
+
             # Clear CUDA cache and reset if available
             if self.device == "cuda" and torch.cuda.is_available():
                 torch.cuda.empty_cache()
                 torch.cuda.synchronize()
-                
+
                 # Some CUDA errors require a full reset
                 # This is a more aggressive approach for suspend/resume issues
                 import gc
                 gc.collect()
                 torch.cuda.empty_cache()
-            
+
             # Reload all models
             logger.info("Reloading models after CUDA error...")
             self.load_models()
-            
+
         except Exception as e:
             logger.error(f"Error during CUDA recovery: {e}")
             # If recovery fails, try falling back to CPU
