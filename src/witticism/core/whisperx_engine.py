@@ -54,7 +54,7 @@ class WhisperXEngine:
         self.hf_token = hf_token
         self.cuda_fallback = False  # Track if we've fallen back from CUDA error
         self.original_device_setting = device  # Store original user setting (could be "auto", "cuda", "cpu")
-        
+
         # Auto-detect device
         if device is None or device == "auto":
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -185,28 +185,28 @@ class WhisperXEngine:
             if not self.loading_cancelled:
                 # Check if this is a CUDA initialization error
                 error_msg = str(e)
-                if self.device == "cuda" and ("CUDA" in error_msg and 
-                    ("unknown error" in error_msg or "failed with error" in error_msg or 
+                if self.device == "cuda" and ("CUDA" in error_msg and
+                    ("unknown error" in error_msg or "failed with error" in error_msg or
                      "launch failure" in error_msg or "invalid device context" in error_msg)):
-                    
+
                     logger.warning(f"CUDA initialization failed: {e}")
                     logger.info("Attempting CPU fallback...")
-                    
+
                     # Fall back to CPU
                     self.device = "cpu"
                     self.compute_type = "int8"
                     self.cuda_fallback = True
-                    
+
                     # Clear any partially loaded models
                     self.model = None
                     self.align_model = None
                     self.diarize_model = None
                     self.metadata = None
-                    
+
                     try:
                         # Retry with CPU
                         self._update_progress("Retrying with CPU...", 10)
-                        
+
                         logger.info(f"Loading WhisperX model on CPU: {self.model_size}")
                         self.model = whisperx.load_model(
                             self.model_size,
@@ -219,7 +219,7 @@ class WhisperXEngine:
                             return
 
                         self._update_progress("Loading alignment model on CPU...", 50)
-                        
+
                         logger.info(f"Loading alignment model on CPU for language: {self.language}")
                         self.align_model, self.metadata = whisperx.load_align_model(
                             language_code=self.language,
@@ -230,7 +230,7 @@ class WhisperXEngine:
                             return
 
                         self._update_progress("Loading diarization model on CPU...", 80)
-                        
+
                         # Optionally load diarization model
                         if self.enable_diarization and self.hf_token:
                             logger.info("Loading diarization model on CPU")
@@ -242,7 +242,7 @@ class WhisperXEngine:
                         self._update_progress("Models loaded successfully (CPU mode)", 100)
                         logger.info("All models loaded successfully on CPU after CUDA fallback")
                         return
-                        
+
                     except Exception as cpu_error:
                         logger.error(f"CPU fallback also failed: {cpu_error}")
                         self._update_progress("Both CUDA and CPU loading failed", 0)
@@ -325,7 +325,7 @@ class WhisperXEngine:
         except Exception as e:
             # Check if this is a CUDA error that might be from suspend/resume
             error_msg = str(e)
-            if "CUDA" in error_msg and ("launch failure" in error_msg or "invalid device context" in error_msg or 
+            if "CUDA" in error_msg and ("launch failure" in error_msg or "invalid device context" in error_msg or
                                        "unknown error" in error_msg or "failed with error" in error_msg):
                 logger.warning(f"CUDA error detected (likely from suspend/resume): {e}")
                 logger.info("Attempting to recover by reloading models...")
@@ -398,25 +398,25 @@ class WhisperXEngine:
             # Clear CUDA cache and reset if available
             if self.device == "cuda" and torch.cuda.is_available():
                 logger.info("Attempting aggressive CUDA cleanup for suspend/resume recovery...")
-                
+
                 # More aggressive cleanup for suspend/resume scenarios
                 import gc
                 gc.collect()
                 torch.cuda.empty_cache()
-                
+
                 try:
                     # Try to reset CUDA context - this may help with suspend/resume issues
                     torch.cuda.synchronize()
                     torch.cuda.empty_cache()
-                    
+
                     # Force garbage collection again
                     gc.collect()
-                    
+
                     # Try to initialize a small tensor to test CUDA
                     test_tensor = torch.tensor([1.0], device='cuda')
                     del test_tensor
                     torch.cuda.empty_cache()
-                    
+
                 except Exception as cuda_test_error:
                     logger.warning(f"CUDA test failed: {cuda_test_error}, will fallback to CPU")
                     raise cuda_test_error
@@ -497,7 +497,7 @@ class WhisperXEngine:
 
     def get_config_device_setting(self) -> str:
         """Get the device setting that should be saved to config.
-        
+
         Returns the original user setting if we're in fallback mode,
         otherwise returns the current device.
         """
