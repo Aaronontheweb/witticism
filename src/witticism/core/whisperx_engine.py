@@ -245,7 +245,7 @@ class WhisperXEngine:
                         
                     except Exception as cpu_error:
                         logger.error(f"CPU fallback also failed: {cpu_error}")
-                        self._update_progress(f"Both CUDA and CPU loading failed", 0)
+                        self._update_progress("Both CUDA and CPU loading failed", 0)
                         raise cpu_error
                 else:
                     logger.error(f"Failed to load models: {e}")
