@@ -6,28 +6,65 @@ set -e
 
 echo "🎙️ Installing Witticism..."
 
+# Check if running as root/sudo (we don't want that)
+if [ "$EUID" -eq 0 ]; then 
+   echo "❌ Please don't run this installer as root/sudo!"
+   echo "   The script will ask for sudo when needed for system packages."
+   echo "   Witticism should be installed as your regular user."
+   exit 1
+fi
+
 # Install system dependencies for pyaudio
+NEEDS_PORTAUDIO=false
 if command -v apt-get &> /dev/null; then
     # Debian/Ubuntu
-    echo "📦 Installing system dependencies..."
     if ! dpkg -l | grep -q portaudio19-dev; then
-        echo "Installing PortAudio development headers (required for voice input)..."
-        sudo apt-get update && sudo apt-get install -y portaudio19-dev
+        NEEDS_PORTAUDIO=true
+        PORTAUDIO_CMD="apt-get update && apt-get install -y portaudio19-dev"
+        PACKAGE_NAME="portaudio19-dev"
     fi
 elif command -v dnf &> /dev/null; then
     # Fedora/RHEL
-    echo "📦 Installing system dependencies..."
     if ! rpm -qa | grep -q portaudio-devel; then
-        echo "Installing PortAudio development headers (required for voice input)..."
-        sudo dnf install -y portaudio-devel
+        NEEDS_PORTAUDIO=true
+        PORTAUDIO_CMD="dnf install -y portaudio-devel"
+        PACKAGE_NAME="portaudio-devel"
     fi
 elif command -v pacman &> /dev/null; then
     # Arch Linux
-    echo "📦 Installing system dependencies..."
     if ! pacman -Q portaudio &> /dev/null; then
-        echo "Installing PortAudio (required for voice input)..."
-        sudo pacman -S --noconfirm portaudio
+        NEEDS_PORTAUDIO=true
+        PORTAUDIO_CMD="pacman -S --noconfirm portaudio"
+        PACKAGE_NAME="portaudio"
     fi
+fi
+
+if [ "$NEEDS_PORTAUDIO" = true ]; then
+    echo "📦 System dependency required: $PACKAGE_NAME"
+    echo "   This provides audio input capabilities for voice recording."
+    
+    # Check if we can use sudo
+    if command -v sudo &> /dev/null; then
+        echo "   Installing with sudo (you may be prompted for password)..."
+        sudo sh -c "$PORTAUDIO_CMD" || {
+            echo "❌ Failed to install $PACKAGE_NAME"
+            echo "   Please install it manually with:"
+            echo "   sudo $PORTAUDIO_CMD"
+            echo ""
+            echo "   Then re-run this installer."
+            exit 1
+        }
+        echo "✓ $PACKAGE_NAME installed"
+    else
+        echo "❌ sudo is required to install system dependencies"
+        echo "   Please install $PACKAGE_NAME manually with:"
+        echo "   $PORTAUDIO_CMD"
+        echo ""
+        echo "   Then re-run this installer."
+        exit 1
+    fi
+else
+    echo "✓ System dependencies already installed"
 fi
 
 # 1. Install pipx if not present
