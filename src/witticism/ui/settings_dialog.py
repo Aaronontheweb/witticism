@@ -207,7 +207,7 @@ class SettingsDialog(QDialog):
         # Check which settings actually changed
         for key, value in settings.items():
             current_value = self.config_manager.get(key, None)
-            
+
             # Compare and only save if changed
             if current_value != value:
                 changed_settings[key] = value
@@ -219,5 +219,5 @@ class SettingsDialog(QDialog):
             self.config_manager.save_config()
             # Emit signal with only changed settings
             self.settings_changed.emit(changed_settings)
-        
+
         super().accept()

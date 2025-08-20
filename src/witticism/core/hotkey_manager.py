@@ -136,7 +136,7 @@ class HotkeyManager:
     def change_ptt_key(self, key):
         self.ptt_key = key
         logger.info(f"PTT key changed to: {key}")
-    
+
     def update_hotkey_from_string(self, key_string: str, hotkey_type: str = "ptt"):
         """Update hotkey from a Qt-style key string (e.g., 'F9', 'Ctrl+Alt+M')"""
         if hotkey_type == "ptt":
@@ -149,17 +149,17 @@ class HotkeyManager:
                 "Space": keyboard.Key.space, "Tab": keyboard.Key.tab,
                 "Enter": keyboard.Key.enter, "Esc": keyboard.Key.esc,
             }
-            
+
             key_upper = key_string.upper()
             if key_upper in key_map:
                 self.change_ptt_key(key_map[key_upper])
                 return True
-            
+
             # Handle single character keys
             if len(key_string) == 1:
                 self.change_ptt_key(keyboard.KeyCode.from_char(key_string.lower()))
                 return True
-                
+
         return False
 
     def set_mode(self, mode: str):
