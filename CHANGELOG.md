@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2025-08-20
+
+### Added
+- Bundled application icons in pip package for reliable installation
+- Auto-upgrade detection in install script
+
+### Improved
+- Install script now upgrades existing installations with `--force` flag
+- Icon installation no longer requires PyQt5 during setup
+- Icons copied directly from installed package location
+
+### Fixed
+- Missing application icons after installation
+- Install script not upgrading when witticism already installed
+
 ## [0.4.0] - 2025-08-20
 
 ### Added
@@ -132,7 +147,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Audio device selection
 - Configuration persistence
 
-[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/Aaronontheweb/witticism/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Aaronontheweb/witticism/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Aaronontheweb/witticism/compare/v0.2.4...v0.3.0
 [0.2.4]: https://github.com/Aaronontheweb/witticism/compare/v0.2.3...v0.2.4
