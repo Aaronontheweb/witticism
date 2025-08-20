@@ -1,7 +1,6 @@
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                              QComboBox, QSlider,
-                             QGroupBox, QFormLayout, QKeySequenceEdit,
-                             QDialogButtonBox, QDoubleSpinBox)
+                             QGroupBox, QFormLayout, QDialogButtonBox, QDoubleSpinBox)
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QKeySequence
 from witticism.ui.icon_utils import create_witticism_icon

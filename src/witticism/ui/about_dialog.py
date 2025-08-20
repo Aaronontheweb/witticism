@@ -2,8 +2,7 @@ import sys
 from pathlib import Path
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QTextBrowser, QTabWidget, QWidget)
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QPixmap, QFont
+from PyQt5.QtGui import QFont
 import importlib.metadata
 from witticism.ui.icon_utils import create_witticism_icon
 
