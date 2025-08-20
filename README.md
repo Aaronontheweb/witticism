@@ -38,13 +38,17 @@ curl -sSL https://raw.githubusercontent.com/Aaronontheweb/witticism/master/insta
 ```
 
 **That's it!** The installer will:
+- ✅ Install system dependencies automatically (asks for sudo only if needed)
 - ✅ Detect your GPU automatically (GTX 1080, RTX 3090, etc.)
 - ✅ Install the right CUDA/PyTorch versions
+- ✅ Create desktop launcher with custom icon
 - ✅ Set up auto-start on login
 - ✅ Configure the system tray icon
 - ✅ Handle all dependencies in an isolated environment
 
 **No Python knowledge required. No CUDA configuration. It just works.**
+
+Note: The installer will ask for your sudo password only if PortAudio needs to be installed. Witticism itself runs as your regular user.
 
 ### Manual Installation
 
@@ -53,22 +57,37 @@ If you prefer to install manually:
 ### Prerequisites
 
 - **Linux** (Ubuntu, Fedora, Debian, etc.)
-- **Python 3.10-3.12** (installed automatically if needed)
+- **Python 3.10-3.12** (pipx will handle this)
 - **NVIDIA GPU** (optional but recommended for faster transcription)
 
 1. Install system dependencies:
 ```bash
+# Debian/Ubuntu
 sudo apt-get install portaudio19-dev
+
+# Fedora/RHEL
+sudo dnf install portaudio-devel
+
+# Arch Linux
+sudo pacman -S portaudio
 ```
 
-2. Install with pipx:
+2. Install pipx if needed:
 ```bash
+python3 -m pip install --user pipx
+python3 -m pipx ensurepath
+```
+
+3. Install Witticism:
+```bash
+# For CPU-only
 pipx install witticism
-```
 
-3. For GPU support with CUDA (optional but recommended):
-```bash
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+# For GPU with CUDA 11.8+
+pipx install witticism --pip-args="--index-url https://download.pytorch.org/whl/cu118 --extra-index-url https://pypi.org/simple"
+
+# For GPU with CUDA 12.1+
+pipx install witticism --pip-args="--index-url https://download.pytorch.org/whl/cu121 --extra-index-url https://pypi.org/simple"
 ```
 
 4. Set up auto-start (optional):
@@ -85,19 +104,9 @@ X-GNOME-Autostart-enabled=true
 EOF
 ```
 
-### Desktop Integration (Optional)
+### Desktop Integration
 
-To add Witticism to your application launcher:
-
-```bash
-# After installing with pipx, run:
-./scripts/install_desktop_entry.sh
-```
-
-This will:
-- Add Witticism to your application menu/launcher
-- Install application icons
-- Enable launching from your desktop environment
+The quick installer automatically sets up desktop integration. If you installed manually, Witticism can still be launched from the terminal with the `witticism` command.
 
 To remove the desktop integration:
 ```bash
