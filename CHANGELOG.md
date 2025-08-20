@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2025-08-20
+
+### Added
+- `--version` flag to CLI for displaying version information
+- Proactive system sleep monitoring to prevent CUDA crashes during suspend/resume cycles
+- Cross-platform sleep detection with Linux DBus integration
+- Automatic GPU context cleanup before system suspend
+
+### Improved
+- Enhanced CUDA error recovery with expanded error pattern detection
+- Robust CPU fallback during model loading failures
+- Better suspend/resume resilience with proactive monitoring instead of reactive recovery
+- Device configuration preservation during fallback operations
+
+### Fixed
+- Root cause of CUDA context invalidation crashes after suspend/resume by switching to proactive approach
+- Permanent application failures after suspend/resume cycles with improved error recovery
+
 ## [0.2.4] - 2025-08-18
 
 ### Added
@@ -84,7 +102,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Audio device selection
 - Configuration persistence
 
-[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/v0.2.4...HEAD
+[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Aaronontheweb/witticism/compare/v0.2.4...v0.3.0
 [0.2.4]: https://github.com/Aaronontheweb/witticism/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/Aaronontheweb/witticism/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/Aaronontheweb/witticism/compare/v0.2.0...v0.2.2
