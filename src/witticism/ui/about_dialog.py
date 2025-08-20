@@ -66,14 +66,14 @@ class AboutDialog(QDialog):
         about_layout = QVBoxLayout()
         about_text = QTextBrowser()
         about_text.setOpenExternalLinks(True)
-        
+
         # Get current hotkey settings
         ptt_key = "F9"  # Default
         mode_switch_key = "Ctrl+Alt+M"  # Default
         if self.config_manager:
             ptt_key = self.config_manager.get("hotkeys.push_to_talk", "F9").upper()
             mode_switch_key = self.config_manager.get("hotkeys.mode_switch", "Ctrl+Alt+M")
-        
+
         about_text.setHtml(f"""
         <p>Witticism is a powerful voice transcription tool that types with your voice anywhere on your system.</p>
 

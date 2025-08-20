@@ -493,7 +493,7 @@ class SystemTrayApp(QSystemTrayIcon):
         ptt_key = "F9"  # Default
         if self.config_manager:
             ptt_key = self.config_manager.get("hotkeys.push_to_talk", "F9").upper()
-        
+
         if mode == "push_to_talk":
             self.ptt_action.setText(f"Push-to-Talk (Hold {ptt_key})")
         else:
