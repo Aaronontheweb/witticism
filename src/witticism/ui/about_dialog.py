@@ -12,7 +12,8 @@ class AboutDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("About Witticism")
         self.setWindowIcon(create_witticism_icon())
-        self.setFixedSize(700, 550)
+        self.resize(750, 600)
+        self.setMinimumSize(600, 450)
         self.init_ui()
 
     def init_ui(self):

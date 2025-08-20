@@ -14,7 +14,8 @@ class SettingsDialog(QDialog):
         self.config_manager = config_manager
         self.setWindowTitle("Settings")
         self.setWindowIcon(create_witticism_icon())
-        self.setFixedSize(650, 700)
+        self.resize(800, 850)
+        self.setMinimumSize(600, 650)
         self.init_ui()
         self.load_current_settings()
 
