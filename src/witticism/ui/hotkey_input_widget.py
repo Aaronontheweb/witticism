@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import (QWidget, QHBoxLayout, QPushButton,
                              QKeySequenceEdit, QLabel)
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtGui import QKeySequence
 
 class HotkeyInputWidget(QWidget):

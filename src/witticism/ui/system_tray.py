@@ -89,8 +89,8 @@ class SystemTrayApp(QSystemTrayIcon):
         self.toggle_action.triggered.connect(self.toggle_enabled)
         self.menu.addAction(self.toggle_action)
 
-        # Push-to-talk action
-        self.ptt_action = QAction("Push-to-Talk (Hold F9)", self)
+        # Push-to-talk action (text will be updated later when config is loaded)
+        self.ptt_action = QAction("Push-to-Talk", self)
         self.ptt_action.setEnabled(False)
         self.menu.addAction(self.ptt_action)
 
@@ -490,10 +490,14 @@ class SystemTrayApp(QSystemTrayIcon):
             self.hotkey_manager.set_mode(mode)
 
         # Update PTT action text
+        ptt_key = "F9"  # Default
+        if self.config_manager:
+            ptt_key = self.config_manager.get("hotkeys.push_to_talk", "F9").upper()
+
         if mode == "push_to_talk":
-            self.ptt_action.setText("Push-to-Talk (Hold F9)")
+            self.ptt_action.setText(f"Push-to-Talk (Hold {ptt_key})")
         else:
-            self.ptt_action.setText("Toggle Dictation (Press F9)")
+            self.ptt_action.setText(f"Toggle Dictation (Press {ptt_key})")
 
         # Stop any ongoing dictation if switching away from toggle mode
         if mode == "push_to_talk" and self.is_dictating:
@@ -620,6 +624,12 @@ class SystemTrayApp(QSystemTrayIcon):
             key_str = settings["hotkeys.push_to_talk"]
             if key_str and self.hotkey_manager.update_hotkey_from_string(key_str, "ptt"):
                 actually_changed = True
+                # Update menu text with new hotkey
+                ptt_key = key_str.upper()
+                if self.mode == "push_to_talk":
+                    self.ptt_action.setText(f"Push-to-Talk (Hold {ptt_key})")
+                else:
+                    self.ptt_action.setText(f"Toggle Dictation (Press {ptt_key})")
 
         # Check which settings actually need restart
         if "audio.sample_rate" in settings:
@@ -651,7 +661,7 @@ class SystemTrayApp(QSystemTrayIcon):
 
     def show_about(self):
         """Show the about dialog"""
-        dialog = AboutDialog()
+        dialog = AboutDialog(config_manager=self.config_manager)
         dialog.exec_()
 
     def on_tray_activated(self, reason):
@@ -695,6 +705,14 @@ class SystemTrayApp(QSystemTrayIcon):
         self.hotkey_manager = hotkey_manager
         self.output_manager = output_manager
         self.config_manager = config_manager
+
+        # Update PTT action text with actual configured hotkey
+        if self.config_manager:
+            ptt_key = self.config_manager.get("hotkeys.push_to_talk", "F9").upper()
+            if self.mode == "push_to_talk":
+                self.ptt_action.setText(f"Push-to-Talk (Hold {ptt_key})")
+            else:
+                self.ptt_action.setText(f"Toggle Dictation (Press {ptt_key})")
 
         # Update device menu now that we have audio_capture
         self.update_device_menu()

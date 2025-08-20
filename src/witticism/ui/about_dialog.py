@@ -2,14 +2,14 @@ import sys
 from pathlib import Path
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QTextBrowser, QTabWidget, QWidget)
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QPixmap, QFont
+from PyQt5.QtGui import QFont
 import importlib.metadata
 from witticism.ui.icon_utils import create_witticism_icon
 
 class AboutDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, config_manager=None, parent=None):
         super().__init__(parent)
+        self.config_manager = config_manager
         self.setWindowTitle("About Witticism")
         self.setWindowIcon(create_witticism_icon())
         self.resize(750, 600)
@@ -66,13 +66,21 @@ class AboutDialog(QDialog):
         about_layout = QVBoxLayout()
         about_text = QTextBrowser()
         about_text.setOpenExternalLinks(True)
-        about_text.setHtml("""
+
+        # Get current hotkey settings
+        ptt_key = "F9"  # Default
+        mode_switch_key = "Ctrl+Alt+M"  # Default
+        if self.config_manager:
+            ptt_key = self.config_manager.get("hotkeys.push_to_talk", "F9").upper()
+            mode_switch_key = self.config_manager.get("hotkeys.mode_switch", "Ctrl+Alt+M")
+
+        about_text.setHtml(f"""
         <p>Witticism is a powerful voice transcription tool that types with your voice anywhere on your system.</p>
 
         <h3>Features:</h3>
         <ul>
-            <li><b>Push-to-Talk Mode:</b> Hold F9 to record, release to transcribe</li>
-            <li><b>Toggle Dictation Mode:</b> Press F9 to start/stop continuous transcription</li>
+            <li><b>Push-to-Talk Mode:</b> Hold {ptt_key} to record, release to transcribe</li>
+            <li><b>Toggle Dictation Mode:</b> Press {ptt_key} to start/stop continuous transcription</li>
             <li><b>GPU Acceleration:</b> Uses CUDA for fast transcription when available</li>
             <li><b>Multiple Models:</b> Choose from tiny to large models based on your needs</li>
             <li><b>System Tray Integration:</b> Runs quietly in the background</li>
@@ -80,8 +88,8 @@ class AboutDialog(QDialog):
 
         <h3>Keyboard Shortcuts:</h3>
         <ul>
-            <li><b>F9:</b> Push-to-talk or toggle dictation (depending on mode)</li>
-            <li><b>Ctrl+Alt+M:</b> Switch between push-to-talk and toggle modes</li>
+            <li><b>{ptt_key}:</b> Push-to-talk or toggle dictation (depending on mode)</li>
+            <li><b>{mode_switch_key}:</b> Switch between push-to-talk and toggle modes</li>
         </ul>
 
         <p>Visit <a href="https://github.com/Aaronontheweb/witticism">GitHub</a> for more information.</p>
