@@ -5,6 +5,7 @@ from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QKeySequence
 from witticism.ui.icon_utils import create_witticism_icon
+from witticism.ui.hotkey_input_widget import HotkeyInputWidget
 
 class SettingsDialog(QDialog):
     settings_changed = pyqtSignal(dict)
@@ -26,11 +27,10 @@ class SettingsDialog(QDialog):
         hotkey_group = QGroupBox("Keyboard Shortcuts")
         hotkey_layout = QFormLayout()
 
-        self.ptt_key_edit = QKeySequenceEdit()
-        # Note: setMaximumSequenceLength might not be available in all PyQt5 versions
+        self.ptt_key_edit = HotkeyInputWidget(default_key="F9")
         hotkey_layout.addRow("Push-to-Talk/Toggle Key:", self.ptt_key_edit)
 
-        self.mode_switch_edit = QKeySequenceEdit()
+        self.mode_switch_edit = HotkeyInputWidget(default_key="Ctrl+Alt+M")
         hotkey_layout.addRow("Switch Mode:", self.mode_switch_edit)
 
         hotkey_group.setLayout(hotkey_layout)
@@ -173,8 +173,8 @@ class SettingsDialog(QDialog):
 
     def restore_defaults(self):
         """Reset all settings to defaults"""
-        self.ptt_key_edit.setKeySequence(QKeySequence("F9"))
-        self.mode_switch_edit.setKeySequence(QKeySequence("Ctrl+Alt+M"))
+        self.ptt_key_edit.reset_to_default()
+        self.mode_switch_edit.reset_to_default()
         self.vad_slider.setValue(2)
         self.sample_rate_combo.setCurrentText("16000")
         self.language_combo.setCurrentIndex(0)  # English
@@ -202,15 +202,22 @@ class SettingsDialog(QDialog):
     def accept(self):
         """Save settings and close"""
         settings = self.get_settings()
+        changed_settings = {}
 
-        # Save each setting
+        # Check which settings actually changed
         for key, value in settings.items():
-            self.config_manager.set(key, value)
+            current_value = self.config_manager.get(key, None)
 
-        # Save to file
-        self.config_manager.save_config()
+            # Compare and only save if changed
+            if current_value != value:
+                changed_settings[key] = value
+                self.config_manager.set(key, value)
 
-        # Emit signal for app to update what it can
-        self.settings_changed.emit(settings)
+        # Only save and emit if there were actual changes
+        if changed_settings:
+            # Save to file
+            self.config_manager.save_config()
+            # Emit signal with only changed settings
+            self.settings_changed.emit(changed_settings)
 
         super().accept()

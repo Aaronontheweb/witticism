@@ -137,6 +137,31 @@ class HotkeyManager:
         self.ptt_key = key
         logger.info(f"PTT key changed to: {key}")
 
+    def update_hotkey_from_string(self, key_string: str, hotkey_type: str = "ptt"):
+        """Update hotkey from a Qt-style key string (e.g., 'F9', 'Ctrl+Alt+M')"""
+        if hotkey_type == "ptt":
+            # Map common keys
+            key_map = {
+                "F1": keyboard.Key.f1, "F2": keyboard.Key.f2, "F3": keyboard.Key.f3,
+                "F4": keyboard.Key.f4, "F5": keyboard.Key.f5, "F6": keyboard.Key.f6,
+                "F7": keyboard.Key.f7, "F8": keyboard.Key.f8, "F9": keyboard.Key.f9,
+                "F10": keyboard.Key.f10, "F11": keyboard.Key.f11, "F12": keyboard.Key.f12,
+                "Space": keyboard.Key.space, "Tab": keyboard.Key.tab,
+                "Enter": keyboard.Key.enter, "Esc": keyboard.Key.esc,
+            }
+
+            key_upper = key_string.upper()
+            if key_upper in key_map:
+                self.change_ptt_key(key_map[key_upper])
+                return True
+
+            # Handle single character keys
+            if len(key_string) == 1:
+                self.change_ptt_key(keyboard.KeyCode.from_char(key_string.lower()))
+                return True
+
+        return False
+
     def set_mode(self, mode: str):
         """Set the hotkey mode: 'push_to_talk' or 'toggle'"""
         if mode not in ["push_to_talk", "toggle"]:

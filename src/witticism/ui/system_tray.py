@@ -588,33 +588,48 @@ class SystemTrayApp(QSystemTrayIcon):
     def on_settings_changed(self, settings):
         """Handle settings changes - reload what we can without restart"""
         needs_restart = []
+        actually_changed = False
 
         # Update language if changed (can reload)
         if "model.language" in settings and self.engine:
-            self.engine.language = settings["model.language"]
+            if self.engine.language != settings["model.language"]:
+                self.engine.language = settings["model.language"]
+                actually_changed = True
 
         # Update chunk duration for dictation (can reload)
         if "dictation.chunk_duration" in settings and self.continuous_capture:
-            self.continuous_capture.chunk_duration = settings["dictation.chunk_duration"]
+            if self.continuous_capture.chunk_duration != settings["dictation.chunk_duration"]:
+                self.continuous_capture.chunk_duration = settings["dictation.chunk_duration"]
+                actually_changed = True
 
         # Update VAD aggressiveness (can reload for new sessions)
         if "audio.vad_aggressiveness" in settings and self.audio_capture:
-            self.audio_capture.vad_aggressiveness = settings["audio.vad_aggressiveness"]
-            if self.audio_capture.vad:
-                self.audio_capture.vad.set_mode(settings["audio.vad_aggressiveness"])
+            if self.audio_capture.vad_aggressiveness != settings["audio.vad_aggressiveness"]:
+                self.audio_capture.vad_aggressiveness = settings["audio.vad_aggressiveness"]
+                if self.audio_capture.vad:
+                    self.audio_capture.vad.set_mode(settings["audio.vad_aggressiveness"])
+                actually_changed = True
 
         # Update pipeline settings (can reload)
         if "pipeline.min_audio_length" in settings:
             # Update transcription pipeline if it exists
             pass  # Would need reference to pipeline
 
-        # Check which settings need restart
-        if "hotkeys.push_to_talk" in settings or "hotkeys.mode_switch" in settings:
-            needs_restart.append("Keyboard shortcuts")
+        # Update hotkeys dynamically (no restart needed)
+        if "hotkeys.push_to_talk" in settings and self.hotkey_manager:
+            key_str = settings["hotkeys.push_to_talk"]
+            if key_str and self.hotkey_manager.update_hotkey_from_string(key_str, "ptt"):
+                actually_changed = True
+
+        # Check which settings actually need restart
         if "audio.sample_rate" in settings:
-            needs_restart.append("Sample rate")
+            current_rate = self.config_manager.get("audio.sample_rate", 16000)
+            if current_rate != settings["audio.sample_rate"]:
+                needs_restart.append("Sample rate")
         if "model.compute_type" in settings:
-            needs_restart.append("Compute type")
+            current_type = self.config_manager.get("model.compute_type", "auto")
+            if current_type != settings["model.compute_type"]:
+                needs_restart.append("Compute type")
 
         # Show message if any settings need restart
         if needs_restart:
@@ -625,7 +640,7 @@ class SystemTrayApp(QSystemTrayIcon):
                 "These settings require restart:\n• " + "\n• ".join(needs_restart) +
                 "\n\nPlease restart the application for these to take effect."
             )
-        else:
+        elif actually_changed:
             # Show brief notification that settings were applied
             self.showMessage(
                 "Settings Applied",
