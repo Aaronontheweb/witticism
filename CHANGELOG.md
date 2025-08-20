@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2025-08-20
+
+### Added
+- Custom hotkey input widget with explicit Edit/Save/Cancel workflow
+- Individual reset buttons for each keyboard shortcut
+- Full desktop integration with application launcher support
+- Automatic icon generation and installation at multiple resolutions
+- Smart sudo handling in install script (only when needed)
+- Desktop entry with proper categories and keywords for launcher discoverability
+
+### Improved
+- Hotkey configuration UX to prevent accidental changes
+- Keyboard shortcuts now update dynamically without restart
+- Settings dialog only shows changes when values actually differ
+- Install script is now fully self-contained with inline icon generation
+- Better separation between system and user-level installations
+- Dialog window sizes optimized for content
+
+### Fixed
+- Aggressive hotkey capture behavior that immediately recorded new keys
+- False restart requirements for keyboard shortcuts
+- Incorrect "Settings Applied" dialog when resetting to defaults
+- Install script running as root/sudo when it shouldn't
+- Missing launcher integration after installation
+
+### Changed
+- Unified desktop entry installation into main install.sh script
+- Removed separate desktop entry scripts in favor of integrated approach
+- Updated README to accurately reflect current installation process
+
 ## [0.3.0] - 2025-08-20
 
 ### Added
@@ -102,7 +132,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Audio device selection
 - Configuration persistence
 
-[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Aaronontheweb/witticism/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Aaronontheweb/witticism/compare/v0.2.4...v0.3.0
 [0.2.4]: https://github.com/Aaronontheweb/witticism/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/Aaronontheweb/witticism/compare/v0.2.2...v0.2.3
