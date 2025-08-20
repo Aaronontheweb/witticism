@@ -70,6 +70,13 @@ class WitticismApp:
             logger.info("Loading WhisperX models...")
             self.engine.load_models()
 
+            # Enable sleep monitoring for proactive CUDA recovery
+            try:
+                self.engine.enable_sleep_monitoring()
+            except Exception as e:
+                logger.warning(f"Sleep monitoring initialization failed: {e}")
+                # Not a fatal error - continue without sleep monitoring
+
             # Initialize audio capture
             self.audio_capture = PushToTalkCapture(
                 sample_rate=self.config_manager.get("audio.sample_rate", 16000),

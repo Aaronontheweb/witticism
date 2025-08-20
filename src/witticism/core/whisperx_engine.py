@@ -85,6 +85,11 @@ class WhisperXEngine:
         self.available_models = ["tiny", "tiny.en", "base", "base.en", "small", "small.en"]
         self.fallback_model = "base"  # Safe fallback model
 
+        # Sleep monitoring
+        self.sleep_monitor = None
+        self.suspend_recovery_attempts = 0
+        self.resume_validation_attempts = 0
+
         logger.info(f"WhisperX Engine initialized: device={self.device}, compute_type={self.compute_type}")
 
     def load_models(self, progress_callback: Optional[Callable[[str, int], None]] = None, timeout: Optional[float] = 300) -> None:
@@ -506,3 +511,97 @@ class WhisperXEngine:
             return self.original_device_setting
         else:
             return self.device
+
+    def enable_sleep_monitoring(self):
+        """Enable proactive sleep/resume monitoring for CUDA recovery"""
+        try:
+            from ..platform.sleep_monitor import create_sleep_monitor
+
+            if self.sleep_monitor is None:
+                self.sleep_monitor = create_sleep_monitor(
+                    on_suspend=self._on_system_suspend,
+                    on_resume=self._on_system_resume
+                )
+
+                if self.sleep_monitor:
+                    self.sleep_monitor.start_monitoring()
+                    logger.info("Sleep monitoring enabled for proactive CUDA recovery")
+                else:
+                    logger.warning("Sleep monitoring not available on this platform")
+
+        except ImportError:
+            logger.warning("Sleep monitoring module not available")
+        except Exception as e:
+            logger.error(f"Failed to enable sleep monitoring: {e}")
+
+    def disable_sleep_monitoring(self):
+        """Disable sleep/resume monitoring"""
+        if self.sleep_monitor:
+            try:
+                self.sleep_monitor.stop_monitoring()
+                self.sleep_monitor = None
+                logger.info("Sleep monitoring disabled")
+            except Exception as e:
+                logger.error(f"Failed to disable sleep monitoring: {e}")
+
+    def _on_system_suspend(self):
+        """Handle system suspend event - proactively clear GPU contexts"""
+        logger.info("System suspend detected - performing proactive GPU cleanup")
+        self.suspend_recovery_attempts += 1
+
+        try:
+            if self.device == "cuda":
+                # Clear models before suspend to avoid context corruption
+                logger.debug("Clearing GPU models and cache before suspend")
+
+                # Clear GPU memory cache
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+
+                # Note: We don't unload models here as that would be disruptive
+                # Instead, we'll validate and recover on resume if needed
+                logger.info("Proactive suspend cleanup completed")
+
+        except Exception as e:
+            logger.error(f"Error during proactive suspend cleanup: {e}")
+
+    def _on_system_resume(self):
+        """Handle system resume event - validate GPU contexts"""
+        logger.info("System resume detected - validating GPU contexts")
+        self.resume_validation_attempts += 1
+
+        try:
+            if self.device == "cuda":
+                # Test CUDA context after resume
+                if self._validate_cuda_context():
+                    logger.info("GPU context validation successful after resume")
+                else:
+                    logger.warning("GPU context invalid after resume - will recover on next use")
+
+        except Exception as e:
+            logger.error(f"Error during resume validation: {e}")
+
+    def _validate_cuda_context(self) -> bool:
+        """Validate CUDA context without disrupting models"""
+        try:
+            if torch.cuda.is_available():
+                # Simple CUDA operation to test context
+                test_tensor = torch.tensor([1.0], device='cuda')
+                torch.cuda.synchronize()
+                del test_tensor
+                torch.cuda.empty_cache()
+                return True
+        except Exception as e:
+            logger.warning(f"CUDA context validation failed: {e}")
+            return False
+
+        return False
+
+    def get_sleep_monitoring_stats(self) -> Dict[str, Any]:
+        """Get sleep monitoring statistics"""
+        return {
+            "sleep_monitoring_enabled": self.sleep_monitor is not None and self.sleep_monitor.is_monitoring() if self.sleep_monitor else False,
+            "suspend_recovery_attempts": self.suspend_recovery_attempts,
+            "resume_validation_attempts": self.resume_validation_attempts,
+            "platform_monitoring_available": self.sleep_monitor is not None
+        }
