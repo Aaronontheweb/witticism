@@ -106,12 +106,7 @@ EOF
 
 ### Desktop Integration
 
-The quick installer automatically sets up desktop integration. If you installed manually, Witticism can still be launched from the terminal with the `witticism` command.
-
-To remove the desktop integration:
-```bash
-./scripts/uninstall_desktop_entry.sh
-```
+The quick installer automatically sets up desktop integration with launcher icon. If you installed manually, Witticism can still be launched from the terminal with the `witticism` command.
 
 ### Upgrading
 
@@ -162,6 +157,7 @@ Options:
 - `--model`: Choose model (tiny, base, small, medium, large-v3)
 - `--log-level`: Set logging verbosity (DEBUG, INFO, WARNING, ERROR)
 - `--reset-config`: Reset settings to defaults
+- `--version`: Show version information
 
 ## Configuration
 
