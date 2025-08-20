@@ -85,6 +85,25 @@ X-GNOME-Autostart-enabled=true
 EOF
 ```
 
+### Desktop Integration (Optional)
+
+To add Witticism to your application launcher:
+
+```bash
+# After installing with pipx, run:
+./scripts/install_desktop_entry.sh
+```
+
+This will:
+- Add Witticism to your application menu/launcher
+- Install application icons
+- Enable launching from your desktop environment
+
+To remove the desktop integration:
+```bash
+./scripts/uninstall_desktop_entry.sh
+```
+
 ### Upgrading
 
 To upgrade to the latest version:
