@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Missing application icons after installation
 - Install script not upgrading when witticism already installed
+- Hardcoded F9 key display in About dialog and system tray menu - now shows actual configured hotkeys
 
 ## [0.4.0] - 2025-08-20
 
