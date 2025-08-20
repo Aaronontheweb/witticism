@@ -219,3 +219,9 @@ src/witticism/_version.py
 
 # Claude worktree management
 .claude-wt/worktrees
+
+# Local testing files
+test_local.sh
+test_dialogs.py
+cleanup_local.sh
+.test_venv/
