@@ -95,97 +95,56 @@ else
     INDEX_URL="https://download.pytorch.org/whl/cpu"
 fi
 
-# 3. Install Witticism
-echo "📦 Installing Witticism with dependencies..."
-echo "⏳ This may take several minutes as PyTorch and WhisperX are large packages"
-echo ""
-pipx install witticism --verbose --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple --verbose"
+# 3. Install/Upgrade Witticism
+if pipx list | grep -q "witticism"; then
+    echo "📦 Upgrading Witticism to latest version..."
+    echo "⏳ This may take several minutes as PyTorch and WhisperX are large packages"
+    echo ""
+    pipx upgrade --force witticism --verbose --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple --verbose"
+else
+    echo "📦 Installing Witticism with dependencies..."
+    echo "⏳ This may take several minutes as PyTorch and WhisperX are large packages"
+    echo ""
+    pipx install witticism --verbose --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple --verbose"
+fi
 
-# 4. Generate and install icons
+# 4. Install icons from package
 echo "🎨 Setting up application icons..."
 
-# Generate icons inline using Python
-python3 << 'EOF' 2>/dev/null || echo "⚠️  Could not generate custom icons"
-import sys
-import os
-from pathlib import Path
+# Find the witticism package location
+WITTICISM_PKG=""
+if [ -d "$HOME/.local/pipx/venvs/witticism" ]; then
+    # Find the site-packages directory
+    WITTICISM_PKG=$(find "$HOME/.local/pipx/venvs/witticism" -name "witticism" -type d | grep -E "site-packages/witticism$" | head -1)
+fi
 
-try:
-    from PyQt5.QtGui import QIcon, QPixmap, QPainter, QFont, QColor
-    from PyQt5.QtCore import Qt
-    from PyQt5.QtWidgets import QApplication
+if [ -z "$WITTICISM_PKG" ]; then
+    # Try to find it using Python
+    WITTICISM_PKG=$(python3 -c "import witticism, os; print(os.path.dirname(witticism.__file__))" 2>/dev/null || true)
+fi
+
+if [ -n "$WITTICISM_PKG" ] && [ -d "$WITTICISM_PKG/assets" ]; then
+    echo "  Found bundled icons in package"
     
-    # Create QApplication (required for Qt)
-    app = QApplication(sys.argv)
+    # Install icons at various sizes
+    for size in 16 24 32 48 64 128 256 512; do
+        icon_dir="$HOME/.local/share/icons/hicolor/${size}x${size}/apps"
+        mkdir -p "$icon_dir"
+        if [ -f "$WITTICISM_PKG/assets/witticism_${size}x${size}.png" ]; then
+            cp "$WITTICISM_PKG/assets/witticism_${size}x${size}.png" "$icon_dir/witticism.png"
+            echo "  Installed ${size}x${size} icon"
+        fi
+    done
     
-    # Icon sizes to generate
-    sizes = [16, 24, 32, 48, 64, 128, 256, 512]
-    
-    for size in sizes:
-        # Create pixmap
-        pixmap = QPixmap(size, size)
-        pixmap.fill(Qt.transparent)
-        
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing)
-        
-        # Calculate dimensions
-        margin = size // 8
-        circle_size = size - (2 * margin)
-        
-        # Draw green circle background
-        painter.setBrush(QColor(76, 175, 80))  # Green
-        painter.setPen(Qt.NoPen)
-        painter.drawEllipse(margin, margin, circle_size, circle_size)
-        
-        # Draw "W" text
-        painter.setPen(Qt.white)
-        font_size = size // 3
-        font = QFont("Arial", font_size, QFont.Bold)
-        painter.setFont(font)
-        painter.drawText(pixmap.rect(), Qt.AlignCenter, "W")
-        
-        painter.end()
-        
-        # Save icon
-        icon_dir = Path.home() / ".local/share/icons/hicolor" / f"{size}x{size}" / "apps"
-        icon_dir.mkdir(parents=True, exist_ok=True)
-        icon_path = icon_dir / "witticism.png"
-        pixmap.save(str(icon_path), "PNG")
-        print(f"  Generated {size}x{size} icon")
-    
-    # Also save to pixmaps for legacy support
-    pixmaps_dir = Path.home() / ".local/share/pixmaps"
-    pixmaps_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Generate main 512x512 icon for pixmaps
-    pixmap = QPixmap(512, 512)
-    pixmap.fill(Qt.transparent)
-    
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.Antialiasing)
-    
-    margin = 512 // 8
-    circle_size = 512 - (2 * margin)
-    
-    painter.setBrush(QColor(76, 175, 80))
-    painter.setPen(Qt.NoPen)
-    painter.drawEllipse(margin, margin, circle_size, circle_size)
-    
-    painter.setPen(Qt.white)
-    font = QFont("Arial", 512 // 3, QFont.Bold)
-    painter.setFont(font)
-    painter.drawText(pixmap.rect(), Qt.AlignCenter, "W")
-    
-    painter.end()
-    
-    pixmap.save(str(pixmaps_dir / "witticism.png"), "PNG")
-    print("  Generated main icon")
-    
-except ImportError:
-    print("PyQt5 not available, skipping icon generation")
-    sys.exit(1)
-EOF
+    # Install main icon for legacy applications
+    if [ -f "$WITTICISM_PKG/assets/witticism.png" ]; then
+        mkdir -p "$HOME/.local/share/pixmaps"
+        cp "$WITTICISM_PKG/assets/witticism.png" "$HOME/.local/share/pixmaps/witticism.png"
+        echo "  Installed main icon"
+    fi
+else
+    echo "⚠️  Could not find bundled icons in package"
+fi
 
 # Update icon cache if available
 if command -v gtk-update-icon-cache &> /dev/null; then
