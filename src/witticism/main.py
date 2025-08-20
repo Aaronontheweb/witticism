@@ -24,6 +24,7 @@ from witticism.ui.system_tray import SystemTrayApp
 from witticism.utils.output_manager import OutputManager
 from witticism.utils.config_manager import ConfigManager
 from witticism.utils.logging_config import setup_logging
+import witticism
 
 logger = logging.getLogger(__name__)
 
@@ -209,6 +210,11 @@ def main():
         "--reset-config",
         action="store_true",
         help="Reset configuration to defaults"
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {witticism.__version__}"
     )
 
     args = parser.parse_args()
