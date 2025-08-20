@@ -4,6 +4,7 @@ from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                              QDialogButtonBox, QDoubleSpinBox)
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QKeySequence
+from witticism.ui.icon_utils import create_witticism_icon
 
 class SettingsDialog(QDialog):
     settings_changed = pyqtSignal(dict)
@@ -12,7 +13,8 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.config_manager = config_manager
         self.setWindowTitle("Settings")
-        self.setFixedSize(450, 500)
+        self.setWindowIcon(create_witticism_icon())
+        self.setFixedSize(650, 700)
         self.init_ui()
         self.load_current_settings()
 

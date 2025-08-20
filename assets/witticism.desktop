@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Witticism
+Comment=WhisperX-powered voice transcription tool
+Exec=witticism
+Icon=witticism
+Terminal=false
+Categories=Utility;AudioVideo;Accessibility;
+Keywords=voice;transcription;speech;whisper;dictation;
+StartupNotify=false

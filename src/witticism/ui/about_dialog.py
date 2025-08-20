@@ -5,12 +5,14 @@ from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPixmap, QFont
 import importlib.metadata
+from witticism.ui.icon_utils import create_witticism_icon
 
 class AboutDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("About Witticism")
-        self.setFixedSize(500, 400)
+        self.setWindowIcon(create_witticism_icon())
+        self.setFixedSize(700, 550)
         self.init_ui()
 
     def init_ui(self):
@@ -19,22 +21,10 @@ class AboutDialog(QDialog):
         # Header with icon and title
         header_layout = QHBoxLayout()
 
-        # App icon (create a simple one)
+        # App icon
         icon_label = QLabel()
-        pixmap = QPixmap(64, 64)
-        pixmap.fill(Qt.transparent)
-        from PyQt5.QtGui import QPainter, QColor
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing)
-        painter.setBrush(QColor(76, 175, 80))
-        painter.setPen(Qt.NoPen)
-        painter.drawEllipse(8, 8, 48, 48)
-        painter.setPen(Qt.white)
-        font = QFont("Arial", 20, QFont.Bold)
-        painter.setFont(font)
-        painter.drawText(pixmap.rect(), Qt.AlignCenter, "W")
-        painter.end()
-        icon_label.setPixmap(pixmap)
+        icon = create_witticism_icon(64)
+        icon_label.setPixmap(icon.pixmap(64, 64))
 
         # Title and version
         title_layout = QVBoxLayout()
