@@ -14,51 +14,72 @@ if [ "$EUID" -eq 0 ]; then
    exit 1
 fi
 
-# Install system dependencies for pyaudio
-NEEDS_PORTAUDIO=false
+# Install system dependencies for pyaudio and sleep monitoring
+NEEDS_DEPS=false
 if command -v apt-get &> /dev/null; then
     # Debian/Ubuntu
+    MISSING_PACKAGES=()
     if ! dpkg -l | grep -q portaudio19-dev; then
-        NEEDS_PORTAUDIO=true
-        PORTAUDIO_CMD="apt-get update && apt-get install -y portaudio19-dev"
-        PACKAGE_NAME="portaudio19-dev"
+        MISSING_PACKAGES+=("portaudio19-dev")
+    fi
+    if ! dpkg -l | grep -q libgirepository-2.0-dev; then
+        MISSING_PACKAGES+=("libgirepository-2.0-dev")
+    fi
+    if [ ${#MISSING_PACKAGES[@]} -gt 0 ]; then
+        NEEDS_DEPS=true
+        DEPS_CMD="apt-get update && apt-get install -y ${MISSING_PACKAGES[*]}"
+        PACKAGE_LIST="${MISSING_PACKAGES[*]}"
     fi
 elif command -v dnf &> /dev/null; then
     # Fedora/RHEL
+    MISSING_PACKAGES=()
     if ! rpm -qa | grep -q portaudio-devel; then
-        NEEDS_PORTAUDIO=true
-        PORTAUDIO_CMD="dnf install -y portaudio-devel"
-        PACKAGE_NAME="portaudio-devel"
+        MISSING_PACKAGES+=("portaudio-devel")
+    fi
+    if ! rpm -qa | grep -q gobject-introspection-devel; then
+        MISSING_PACKAGES+=("gobject-introspection-devel")
+    fi
+    if [ ${#MISSING_PACKAGES[@]} -gt 0 ]; then
+        NEEDS_DEPS=true
+        DEPS_CMD="dnf install -y ${MISSING_PACKAGES[*]}"
+        PACKAGE_LIST="${MISSING_PACKAGES[*]}"
     fi
 elif command -v pacman &> /dev/null; then
     # Arch Linux
+    MISSING_PACKAGES=()
     if ! pacman -Q portaudio &> /dev/null; then
-        NEEDS_PORTAUDIO=true
-        PORTAUDIO_CMD="pacman -S --noconfirm portaudio"
-        PACKAGE_NAME="portaudio"
+        MISSING_PACKAGES+=("portaudio")
+    fi
+    if ! pacman -Q gobject-introspection &> /dev/null; then
+        MISSING_PACKAGES+=("gobject-introspection")
+    fi
+    if [ ${#MISSING_PACKAGES[@]} -gt 0 ]; then
+        NEEDS_DEPS=true
+        DEPS_CMD="pacman -S --noconfirm ${MISSING_PACKAGES[*]}"
+        PACKAGE_LIST="${MISSING_PACKAGES[*]}"
     fi
 fi
 
-if [ "$NEEDS_PORTAUDIO" = true ]; then
-    echo "📦 System dependency required: $PACKAGE_NAME"
-    echo "   This provides audio input capabilities for voice recording."
+if [ "$NEEDS_DEPS" = true ]; then
+    echo "📦 System dependencies required: $PACKAGE_LIST"
+    echo "   These provide audio input and sleep monitoring capabilities."
     
     # Check if we can use sudo
     if command -v sudo &> /dev/null; then
         echo "   Installing with sudo (you may be prompted for password)..."
-        sudo sh -c "$PORTAUDIO_CMD" || {
-            echo "❌ Failed to install $PACKAGE_NAME"
-            echo "   Please install it manually with:"
-            echo "   sudo $PORTAUDIO_CMD"
+        sudo sh -c "$DEPS_CMD" || {
+            echo "❌ Failed to install $PACKAGE_LIST"
+            echo "   Please install them manually with:"
+            echo "   sudo $DEPS_CMD"
             echo ""
             echo "   Then re-run this installer."
             exit 1
         }
-        echo "✓ $PACKAGE_NAME installed"
+        echo "✓ $PACKAGE_LIST installed"
     else
         echo "❌ sudo is required to install system dependencies"
-        echo "   Please install $PACKAGE_NAME manually with:"
-        echo "   $PORTAUDIO_CMD"
+        echo "   Please install $PACKAGE_LIST manually with:"
+        echo "   $DEPS_CMD"
         echo ""
         echo "   Then re-run this installer."
         exit 1
@@ -95,18 +116,11 @@ else
     INDEX_URL="https://download.pytorch.org/whl/cpu"
 fi
 
-# 3. Install/Upgrade Witticism
-if pipx list | grep -q "witticism"; then
-    echo "📦 Upgrading Witticism to latest version..."
-    echo "⏳ This may take several minutes as PyTorch and WhisperX are large packages"
-    echo ""
-    pipx upgrade --force witticism --verbose --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple --verbose"
-else
-    echo "📦 Installing Witticism with dependencies..."
-    echo "⏳ This may take several minutes as PyTorch and WhisperX are large packages"
-    echo ""
-    pipx install witticism --verbose --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple --verbose"
-fi
+# 3. Install/Upgrade Witticism (idempotent)
+echo "📦 Installing/upgrading Witticism to latest version..."
+echo "⏳ This may take several minutes as PyTorch and WhisperX are large packages"
+echo ""
+pipx install --force witticism --verbose --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple --verbose"
 
 # 4. Install icons from package
 echo "🎨 Setting up application icons..."

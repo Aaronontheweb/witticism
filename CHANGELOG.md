@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2025-08-21
+
+### Added
+- PyGObject as pip dependency for sleep monitoring functionality
+- System dependency detection for GObject Introspection development libraries
+
+### Improved
+- Install script now installs minimal development libraries needed for PyGObject compilation
+- Sleep monitoring system dependencies are automatically handled during installation
+- Manual installation instructions updated with correct system dependencies
+
+### Fixed
+- Missing PyGObject dependency that prevented sleep monitoring from working
+- Silent failure of suspend/resume CUDA recovery due to missing GObject Introspection
+- Install script not detecting all required system dependencies for sleep monitoring
+
 ## [0.4.1] - 2025-08-20
 
 ### Added

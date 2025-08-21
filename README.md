@@ -17,7 +17,7 @@ WhisperX-powered voice transcription tool that types text directly at your curso
 - **🔄 Continuous Dictation Mode** - Toggle on for hands-free transcription
 - **🎯 System Tray Integration** - Runs quietly in background, always ready
 - **📦 No Configuration** - Works out of the box with smart defaults
-- **🔧 Auto-Updates** - Built-in upgrade command keeps you current
+- **🔧 Easy Updates** - Re-run install script to upgrade to latest version
 
 ## Why Witticism?
 
@@ -63,13 +63,13 @@ If you prefer to install manually:
 1. Install system dependencies:
 ```bash
 # Debian/Ubuntu
-sudo apt-get install portaudio19-dev
+sudo apt-get install portaudio19-dev libgirepository-2.0-dev
 
 # Fedora/RHEL
-sudo dnf install portaudio-devel
+sudo dnf install portaudio-devel gobject-introspection-devel
 
 # Arch Linux
-sudo pacman -S portaudio
+sudo pacman -S portaudio gobject-introspection
 ```
 
 2. Install pipx if needed:
@@ -110,18 +110,13 @@ The quick installer automatically sets up desktop integration with launcher icon
 
 ### Upgrading
 
-To upgrade to the latest version:
+To upgrade to the latest version, simply re-run the install script:
 
 ```bash
-pipx upgrade witticism
+curl -sSL https://raw.githubusercontent.com/Aaronontheweb/witticism/master/install.sh | bash
 ```
 
-Or use the upgrade script (recommended):
-```bash
-curl -sSL https://raw.githubusercontent.com/Aaronontheweb/witticism/master/upgrade.sh | bash
-```
-
-**Note**: The upgrade script will automatically stop any running Witticism instance during the upgrade and restart it afterward if auto-start is configured.
+The install script is idempotent and will automatically upgrade existing installations to the latest version with all dependencies.
 
 ## Usage
 
