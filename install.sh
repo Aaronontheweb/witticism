@@ -116,18 +116,11 @@ else
     INDEX_URL="https://download.pytorch.org/whl/cpu"
 fi
 
-# 3. Install/Upgrade Witticism
-if pipx list | grep -q "witticism"; then
-    echo "📦 Upgrading Witticism to latest version..."
-    echo "⏳ This may take several minutes as PyTorch and WhisperX are large packages"
-    echo ""
-    pipx upgrade --force witticism --verbose --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple --verbose"
-else
-    echo "📦 Installing Witticism with dependencies..."
-    echo "⏳ This may take several minutes as PyTorch and WhisperX are large packages"
-    echo ""
-    pipx install witticism --verbose --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple --verbose"
-fi
+# 3. Install/Upgrade Witticism (idempotent)
+echo "📦 Installing/upgrading Witticism to latest version..."
+echo "⏳ This may take several minutes as PyTorch and WhisperX are large packages"
+echo ""
+pipx install --force witticism --verbose --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple --verbose"
 
 # 4. Install icons from package
 echo "🎨 Setting up application icons..."
