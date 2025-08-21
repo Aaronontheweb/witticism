@@ -35,6 +35,7 @@ dependencies = [
     "pyperclip>=1.8.0",
     "platformdirs>=3.0.0",
     "pydbus>=0.6.0",
+    "PyGObject>=3.40.0",
 ]
 
 
