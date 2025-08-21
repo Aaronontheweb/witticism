@@ -63,13 +63,13 @@ If you prefer to install manually:
 1. Install system dependencies:
 ```bash
 # Debian/Ubuntu
-sudo apt-get install portaudio19-dev libgirepository-2.0-dev
+sudo apt-get install portaudio19-dev
 
 # Fedora/RHEL
-sudo dnf install portaudio-devel gobject-introspection-devel
+sudo dnf install portaudio-devel
 
 # Arch Linux
-sudo pacman -S portaudio gobject-introspection
+sudo pacman -S portaudio
 ```
 
 2. Install pipx if needed:
