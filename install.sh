@@ -14,16 +14,13 @@ if [ "$EUID" -eq 0 ]; then
    exit 1
 fi
 
-# Install system dependencies for pyaudio and sleep monitoring
+# Install system dependencies for pyaudio
 NEEDS_DEPS=false
 if command -v apt-get &> /dev/null; then
     # Debian/Ubuntu
     MISSING_PACKAGES=()
     if ! dpkg -l | grep -q portaudio19-dev; then
         MISSING_PACKAGES+=("portaudio19-dev")
-    fi
-    if ! dpkg -l | grep -q libgirepository-2.0-dev; then
-        MISSING_PACKAGES+=("libgirepository-2.0-dev")
     fi
     if [ ${#MISSING_PACKAGES[@]} -gt 0 ]; then
         NEEDS_DEPS=true
@@ -36,9 +33,6 @@ elif command -v dnf &> /dev/null; then
     if ! rpm -qa | grep -q portaudio-devel; then
         MISSING_PACKAGES+=("portaudio-devel")
     fi
-    if ! rpm -qa | grep -q gobject-introspection-devel; then
-        MISSING_PACKAGES+=("gobject-introspection-devel")
-    fi
     if [ ${#MISSING_PACKAGES[@]} -gt 0 ]; then
         NEEDS_DEPS=true
         DEPS_CMD="dnf install -y ${MISSING_PACKAGES[*]}"
@@ -50,9 +44,6 @@ elif command -v pacman &> /dev/null; then
     if ! pacman -Q portaudio &> /dev/null; then
         MISSING_PACKAGES+=("portaudio")
     fi
-    if ! pacman -Q gobject-introspection &> /dev/null; then
-        MISSING_PACKAGES+=("gobject-introspection")
-    fi
     if [ ${#MISSING_PACKAGES[@]} -gt 0 ]; then
         NEEDS_DEPS=true
         DEPS_CMD="pacman -S --noconfirm ${MISSING_PACKAGES[*]}"
@@ -62,7 +53,7 @@ fi
 
 if [ "$NEEDS_DEPS" = true ]; then
     echo "📦 System dependencies required: $PACKAGE_LIST"
-    echo "   These provide audio input and sleep monitoring capabilities."
+    echo "   This provides audio input capabilities for voice recording."
     
     # Check if we can use sudo
     if command -v sudo &> /dev/null; then
