@@ -282,9 +282,9 @@ class SystemTrayApp(QSystemTrayIcon):
         """Update model menu checkmarks based on current config"""
         if not self.config_manager:
             return
-            
+
         current_model = self.config_manager.get("model.size", "base")
-        
+
         # Update checkmarks for all model actions
         for action in self.model_actions:
             action.setChecked(action.data() == current_model)
