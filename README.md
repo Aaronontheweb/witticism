@@ -195,6 +195,18 @@ Should return `True` if CUDA is available.
 ### Models not loading
 First run downloads models (~150MB for base). Ensure stable internet connection.
 
+### Debug logging
+By default, witticism logs to `~/.local/share/witticism/debug.log` when debug level is enabled. 
+
+To enable debug logging, either:
+- Run with `--log-level DEBUG`
+- Edit `~/.config/witticism/config.json` and set `"logging": {"level": "DEBUG", "file": "~/.local/share/witticism/debug.log"}`
+
+Common issues visible in debug logs:
+- "No active speech found in audio" - Check microphone connection/volume
+- CUDA context errors - Restart after suspend/resume
+- Model loading failures - Check GPU memory with `nvidia-smi`
+
 ## Development
 
 ### Project Structure
