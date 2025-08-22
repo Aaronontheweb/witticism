@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.3] - 2025-08-22
+
+### Added
+- Debug logging documentation to README with instructions for enabling debug mode and locating log files
+
+### Improved
+- Simplified installation requirements by removing unnecessary GObject introspection dependencies
+- Installation process now only requires PortAudio packages for audio capture functionality
+
+### Fixed
+- Model selection not persisting after application upgrades or restarts - menu selection now correctly reflects saved configuration
+
 ## [0.4.2] - 2025-08-21
 
 ### Added
@@ -164,7 +176,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Audio device selection
 - Configuration persistence
 
-[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/Aaronontheweb/witticism/compare/v0.4.2...v0.4.3
+[0.4.2]: https://github.com/Aaronontheweb/witticism/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/Aaronontheweb/witticism/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Aaronontheweb/witticism/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Aaronontheweb/witticism/compare/v0.2.4...v0.3.0
