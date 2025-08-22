@@ -278,6 +278,17 @@ class SystemTrayApp(QSystemTrayIcon):
                 )
                 self.device_menu.addAction(action)
 
+    def update_model_menu_selection(self):
+        """Update model menu checkmarks based on current config"""
+        if not self.config_manager:
+            return
+
+        current_model = self.config_manager.get("model.size", "base")
+
+        # Update checkmarks for all model actions
+        for action in self.model_actions:
+            action.setChecked(action.data() == current_model)
+
     def set_status(self, status: str):
         # Check if we're in CUDA fallback mode
         if self.engine and hasattr(self.engine, 'cuda_fallback') and self.engine.cuda_fallback:
@@ -716,3 +727,7 @@ class SystemTrayApp(QSystemTrayIcon):
 
         # Update device menu now that we have audio_capture
         self.update_device_menu()
+
+        # Update model menu now that we have config_manager - this ensures
+        # the correct model is checked after restarts/upgrades
+        self.update_model_menu_selection()
