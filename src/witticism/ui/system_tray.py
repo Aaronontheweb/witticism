@@ -430,7 +430,7 @@ class SystemTrayApp(QSystemTrayIcon):
         """Show a general system tray notification."""
         if icon is None:
             icon = QSystemTrayIcon.Information
-            
+
         if self.supportsMessages():
             self.showMessage(title, message, icon, duration)
 

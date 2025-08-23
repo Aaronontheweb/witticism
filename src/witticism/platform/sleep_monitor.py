@@ -80,11 +80,11 @@ class SystemdInhibitorSleepMonitor(LinuxDBusSleepMonitor):
         super().__init__(on_suspend, on_resume)
         self.inhibitor_process = None
         self.cleanup_timeout = 20  # seconds max delay for cleanup
-        
+
     def _check_inhibitor_support(self) -> bool:
         """Check if systemd inhibitors are available"""
         try:
-            result = subprocess.run(['systemd-inhibit', '--help'], 
+            result = subprocess.run(['systemd-inhibit', '--help'],
                                   capture_output=True, timeout=2)
             return result.returncode == 0
         except Exception:
@@ -94,10 +94,10 @@ class SystemdInhibitorSleepMonitor(LinuxDBusSleepMonitor):
         """Handle DBus PrepareForSleep signal with inhibitor protection"""
         if suspending:
             logger.info("Suspend detected - acquiring inhibitor lock for CUDA cleanup")
-            
+
             # CRITICAL: Start inhibitor BEFORE cleanup to delay suspend
             inhibitor_acquired = self._acquire_inhibitor()
-            
+
             try:
                 # Now we have guaranteed time to clean up safely
                 logger.info("Performing CUDA cleanup with suspend protection")
@@ -109,7 +109,7 @@ class SystemdInhibitorSleepMonitor(LinuxDBusSleepMonitor):
                 # ALWAYS release lock, even on failure - system must be able to suspend
                 if inhibitor_acquired:
                     self._release_inhibitor()
-                    
+
         else:
             logger.info("System resumed from suspend")
             self.on_resume()
@@ -125,13 +125,13 @@ class SystemdInhibitorSleepMonitor(LinuxDBusSleepMonitor):
                 '--mode=delay',
                 'sleep', str(self.cleanup_timeout)
             ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            
+
             logger.debug(f"Acquired suspend inhibitor (max {self.cleanup_timeout}s delay)")
             return True
         except Exception as e:
             logger.error(f"Failed to acquire suspend inhibitor: {e}")
             return False
-            
+
     def _release_inhibitor(self):
         """Allow suspend to proceed by terminating inhibitor process"""
         if self.inhibitor_process:

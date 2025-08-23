@@ -566,9 +566,9 @@ class WhisperXEngine:
                     'device': self.device,
                     'compute_type': self.compute_type
                 }
-                
+
                 logger.warning("NUCLEAR GPU CLEANUP - destroying all models and contexts")
-                
+
                 # NUCLEAR: Complete model destruction
                 if self.model:
                     try:
@@ -577,7 +577,7 @@ class WhisperXEngine:
                         logger.debug(f"Error deleting model: {e}")
                     finally:
                         self.model = None
-                    
+
                 if self.align_model:
                     try:
                         del self.align_model
@@ -585,7 +585,7 @@ class WhisperXEngine:
                         logger.debug(f"Error deleting align_model: {e}")
                     finally:
                         self.align_model = None
-                    
+
                 if self.diarize_model:
                     try:
                         del self.diarize_model
@@ -593,7 +593,7 @@ class WhisperXEngine:
                         logger.debug(f"Error deleting diarize_model: {e}")
                     finally:
                         self.diarize_model = None
-                    
+
                 if self.metadata:
                     self.metadata = None
 
@@ -609,7 +609,7 @@ class WhisperXEngine:
                         logger.debug("CUDA contexts aggressively cleared")
                     except Exception as e:
                         logger.warning(f"CUDA cleanup error (continuing): {e}")
-                
+
                 # Force garbage collection multiple times
                 import gc
                 for _ in range(3):  # Multiple GC passes for thorough cleanup
@@ -632,25 +632,25 @@ class WhisperXEngine:
             # Check if we have suspend state and models were unloaded
             if hasattr(self, '_suspend_state') and self._suspend_state:
                 logger.info("Found suspended state - testing CUDA recovery")
-                
+
                 # Comprehensive CUDA health test
                 if self._test_cuda_health():
                     logger.info("CUDA healthy after resume - initiating model restoration")
-                    
+
                     # Restore models in background to avoid blocking resume
                     import threading
                     restore_thread = threading.Thread(
-                        target=self._restore_models_background, 
+                        target=self._restore_models_background,
                         daemon=True,
                         name="witticism-model-restore"
                     )
                     restore_thread.start()
-                    
+
                 else:
                     logger.warning("CUDA unhealthy after resume - permanent CPU fallback")
                     self._force_cpu_fallback_after_suspend()
                     self._suspend_state = None
-                    
+
             elif self.device == "cuda" and self.is_loaded():
                 # Models are still loaded, test CUDA health
                 if self._test_cuda_health():
@@ -672,29 +672,29 @@ class WhisperXEngine:
             if not torch.cuda.is_available():
                 logger.debug("torch.cuda.is_available() returned False")
                 return False
-                
+
             # Test 1: Basic tensor operation
             test_tensor = torch.randn(100, device='cuda')
             test_tensor.sum().item()  # Force computation to test GPU
             torch.cuda.synchronize()
             del test_tensor
-            
+
             # Test 2: Memory allocation and cleanup
             large_tensor = torch.zeros(1000, 1000, device='cuda')
             del large_tensor
             torch.cuda.empty_cache()
-            
+
             # Test 3: Multiple GPU operations
             for _ in range(3):
                 x = torch.randn(50, device='cuda')
                 y = torch.randn(50, device='cuda')
                 z = x @ y
                 del x, y, z
-            
+
             torch.cuda.synchronize()
             logger.debug("CUDA health check passed - GPU is fully functional")
             return True
-            
+
         except Exception as e:
             logger.warning(f"CUDA health check failed: {e}")
             return False
@@ -703,7 +703,7 @@ class WhisperXEngine:
         """Force permanent CPU mode after suspend when CUDA is damaged"""
         logger.warning("Forcing CPU fallback - CUDA damaged by suspend/resume")
         self.device = "cpu"
-        self.compute_type = "int8" 
+        self.compute_type = "int8"
         self.cuda_fallback = True
         # Reset any CUDA-related state
         if hasattr(self, '_suspend_state'):
@@ -715,20 +715,20 @@ class WhisperXEngine:
             if not hasattr(self, '_suspend_state') or not self._suspend_state:
                 logger.warning("No suspend state available for model restoration")
                 return
-                
+
             logger.info("Starting background model restoration after resume")
             suspend_state = self._suspend_state
-            
+
             # Double-check CUDA health before proceeding
             if not self._test_cuda_health():
                 logger.error("CUDA health deteriorated during restoration - aborting")
                 self._force_cpu_fallback_after_suspend()
                 return
-            
+
             # Restore models with the same parameters as before suspend
             try:
                 logger.info(f"Restoring WhisperX model: {suspend_state['model_size']} on {suspend_state['device']}")
-                
+
                 # Load main whisper model
                 self.model = whisperx.load_model(
                     suspend_state['model_size'],
@@ -736,18 +736,18 @@ class WhisperXEngine:
                     compute_type=suspend_state['compute_type'],
                     language=suspend_state['language']
                 )
-                
+
                 # Verify model loaded successfully
                 if self.model is None:
                     raise RuntimeError("WhisperX model failed to load")
-                
+
                 # Load alignment model
                 logger.info("Restoring alignment model")
                 self.align_model, self.metadata = whisperx.load_align_model(
                     language_code=suspend_state['language'],
                     device=suspend_state['device']
                 )
-                
+
                 # Load diarization model if enabled
                 if suspend_state['enable_diarization'] and suspend_state['hf_token']:
                     logger.info("Restoring diarization model")
@@ -755,7 +755,7 @@ class WhisperXEngine:
                         use_auth_token=suspend_state['hf_token'],
                         device=suspend_state['device']
                     )
-                
+
                 # Final health check with restored models
                 if self._test_cuda_health():
                     logger.info("Model restoration completed successfully - GPU fully operational")
@@ -763,12 +763,12 @@ class WhisperXEngine:
                     self._suspend_state = None
                 else:
                     raise RuntimeError("CUDA health check failed with restored models")
-                
+
             except Exception as e:
                 logger.error(f"Model restoration failed: {e}")
                 logger.warning("Falling back to CPU mode permanently")
                 self._force_cpu_fallback_after_suspend()
-                
+
         except Exception as e:
             logger.error(f"Unexpected error during background model restoration: {e}")
             self._force_cpu_fallback_after_suspend()
