@@ -37,7 +37,7 @@ def ensure_single_instance():
     Returns:
         file object: Lock file handle to keep alive, or None if another instance is running
     """
-    lock_file_path = '/tmp/witticism.lock'
+    lock_file_path = '/tmp/witticism.lock'  # nosec B108
 
     try:
         # Try to create and lock the file
@@ -356,7 +356,7 @@ def main():
         if lock_file:
             try:
                 lock_file.close()
-                os.unlink('/tmp/witticism.lock')
+                os.unlink('/tmp/witticism.lock')  # nosec B108
             except OSError:
                 pass
 
