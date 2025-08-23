@@ -45,7 +45,7 @@ class LinuxDBusSleepMonitor(SleepMonitor):
             self.login_manager = self.bus.get("org.freedesktop.login1")
             logger.info("[SLEEP_MONITOR] INIT: DBus sleep monitoring initialized")
         except ImportError:
-            logger.error("pydbus not available - cannot monitor sleep events")
+            logger.error("[SLEEP_MONITOR] DEPENDENCY_MISSING: pydbus not available - cannot monitor sleep events")
             raise
 
     def start_monitoring(self) -> None:
@@ -148,7 +148,7 @@ class SystemdInhibitorSleepMonitor(LinuxDBusSleepMonitor):
                 self.inhibitor_process.kill()
                 self.inhibitor_process.wait()
             except Exception as e:
-                logger.warning(f"Error releasing inhibitor: {e}")
+                logger.warning(f"[SLEEP_MONITOR] INHIBITOR_ERROR: error releasing inhibitor - {e}")
             finally:
                 self.inhibitor_process = None
                 logger.debug("[SLEEP_MONITOR] INHIBITOR_RELEASED: systemd inhibitor terminated, suspend allowed")
