@@ -6,7 +6,6 @@ Tests both push-to-talk and toggle dictation modes.
 
 import sys
 from pathlib import Path
-import numpy as np
 import time
 
 # Add src to path
