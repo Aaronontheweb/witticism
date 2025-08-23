@@ -33,64 +33,64 @@ logger = logging.getLogger(__name__)
 
 def ensure_single_instance():
     """Ensure only one instance of Witticism is running with zombie cleanup.
-    
+
     Returns:
         file object: Lock file handle to keep alive, or None if another instance is running
     """
     lock_file_path = '/tmp/witticism.lock'
-    
+
     try:
         # Try to create and lock the file
         lock_file = open(lock_file_path, 'w')
         fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        
+
         # Write PID to lock file for debugging
         lock_file.write(str(os.getpid()))
         lock_file.flush()
-        
+
         logger.info(f"Acquired singleton lock: {lock_file_path}")
         return lock_file  # Keep this alive to maintain lock
-        
+
     except (IOError, OSError) as e:
         # Lock file exists - check if the process is still running
         if os.path.exists(lock_file_path):
             try:
                 with open(lock_file_path, 'r') as f:
                     old_pid = f.read().strip()
-                    
+
                 if old_pid.isdigit():
                     old_pid = int(old_pid)
-                    
+
                     # Check if process is still running
                     try:
                         os.kill(old_pid, 0)  # Signal 0 just tests if process exists
                         # Process exists - show user message
                         logger.error(f"Another Witticism instance is running (PID {old_pid})")
                         QMessageBox.information(
-                            None, 
-                            "Witticism Already Running", 
+                            None,
+                            "Witticism Already Running",
                             f"Another instance of Witticism is already running (PID {old_pid}).\n\n"
                             "Check your system tray or use 'ps aux | grep witticism' to find it."
                         )
                         return None
-                        
+
                     except OSError:
                         # Process doesn't exist - zombie lock file
                         logger.warning(f"Cleaning up zombie lock file (dead PID {old_pid})")
                         os.unlink(lock_file_path)
-                        
+
                         # Retry lock acquisition
                         return ensure_single_instance()
-                        
+
             except (ValueError, FileNotFoundError):
                 # Corrupted or missing lock file - clean it up
                 logger.warning("Cleaning up corrupted lock file")
                 try:
                     os.unlink(lock_file_path)
-                except:
+                except OSError:
                     pass
                 return ensure_single_instance()
-        
+
         # Default fallback - couldn't determine state
         logger.error(f"Could not acquire singleton lock: {e}")
         return None
@@ -208,19 +208,19 @@ class WitticismApp:
     def _force_cpu_mode_and_retry(self):
         """Force CPU mode and retry initialization after CUDA failure"""
         logger.warning("Forcing CPU mode due to CUDA initialization failure")
-        
+
         # Update configuration to force CPU mode
         self.config_manager.config["model"]["device"] = "cpu"
         self.config_manager.config["model"]["compute_type"] = "int8"  # CPU optimization
-        
+
         # Clear any existing components
         if hasattr(self, 'engine') and self.engine:
             try:
                 self.engine.cleanup()
-            except:
+            except Exception:
                 pass
             self.engine = None
-            
+
         # Retry initialization with CPU mode
         self.initialize_components()
 
@@ -241,19 +241,19 @@ class WitticismApp:
         except Exception as e:
             error_msg = str(e)
             logger.error(f"Initialization failed: {error_msg}")
-            
+
             # Check if this is a CUDA-related error that we can recover from
-            if ("CUDA" in error_msg or "cuda" in error_msg or 
+            if ("CUDA" in error_msg or "cuda" in error_msg or
                 "GPU" in error_msg or "torch" in error_msg):
                 logger.warning("CUDA-related initialization failure - attempting CPU fallback recovery")
-                
+
                 try:
                     # Force CPU mode and retry initialization
                     self._force_cpu_mode_and_retry()
                     logger.info("Successfully recovered using CPU fallback mode")
                 except Exception as retry_error:
                     logger.error(f"CPU fallback also failed: {retry_error}")
-                    QMessageBox.critical(None, "Initialization Error", 
+                    QMessageBox.critical(None, "Initialization Error",
                                        f"Failed to initialize even with CPU fallback:\n{str(retry_error)}")
                     sys.exit(1)
             else:
@@ -346,7 +346,7 @@ def main():
     lock_file = ensure_single_instance()
     if not lock_file:
         sys.exit(0)  # Another instance is running
-    
+
     # Run application
     try:
         app = WitticismApp(args)
@@ -357,7 +357,7 @@ def main():
             try:
                 lock_file.close()
                 os.unlink('/tmp/witticism.lock')
-            except:
+            except OSError:
                 pass
 
 

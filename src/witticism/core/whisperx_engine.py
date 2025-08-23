@@ -99,7 +99,7 @@ class WhisperXEngine:
 
     def validate_and_clean_cuda_at_startup(self) -> bool:
         """Validate CUDA health at startup and perform nuclear cleanup if corrupted.
-        
+
         Returns:
             bool: True if CUDA is healthy or successfully cleaned, False if should force CPU mode
         """
@@ -108,33 +108,33 @@ class WhisperXEngine:
 
         try:
             logger.info("Performing startup CUDA health check...")
-            
+
             # Test if CUDA context is healthy with minimal operation
             test_tensor = torch.tensor([1.0], device='cuda')
             test_result = test_tensor * 2
             del test_tensor, test_result
             torch.cuda.empty_cache()
-            
+
             logger.info("CUDA context healthy at startup")
             return True
-            
+
         except Exception as e:
             logger.warning(f"CUDA context corrupted at startup: {e}")
             logger.warning("Performing EMERGENCY startup CUDA cleanup...")
-            
+
             try:
                 # Perform the same nuclear cleanup as suspend handler
                 self._nuclear_cuda_startup_cleanup()
-                
+
                 # Test again after cleanup
                 test_tensor = torch.tensor([1.0], device='cuda')
                 del test_tensor
                 torch.cuda.empty_cache()
-                
+
                 logger.info("Startup CUDA cleanup successful - context restored")
                 self.startup_cuda_fixed = True
                 return True
-                
+
             except Exception as cleanup_error:
                 logger.error(f"Startup CUDA cleanup failed: {cleanup_error}")
                 logger.warning("Forcing CPU mode due to irrecoverable CUDA corruption")
@@ -145,20 +145,20 @@ class WhisperXEngine:
         try:
             if torch.cuda.is_available():
                 logger.debug("Performing nuclear CUDA cleanup at startup...")
-                
+
                 # Force PyTorch to release all CUDA memory allocations
                 torch.cuda.empty_cache()
                 torch.cuda.synchronize()
                 torch.cuda.reset_peak_memory_stats()
-                
+
                 # Additional aggressive cleanup
                 torch.cuda.ipc_collect()
-                
+
                 logger.debug("Nuclear CUDA cleanup completed")
-                
+
         except Exception as e:
             logger.warning(f"Nuclear CUDA cleanup error (continuing): {e}")
-        
+
         # Force garbage collection multiple times
         import gc
         for _ in range(3):
