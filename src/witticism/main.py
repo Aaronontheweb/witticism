@@ -145,7 +145,7 @@ class WitticismApp:
                     # Update engine configuration for CPU mode
                     self.engine.device = "cpu"
                     self.engine.compute_type = "int8"
-                    self.engine.cuda_fallback = True  # Mark that we've fallen back due to startup CUDA issue
+                    self.engine.cuda_fallback = True  # Mark that we've fallen back due to startup CUDA issue (closes #56)
                     # Update config manager to persist the change
                     self.config_manager.config["model"]["device"] = "cpu"
                     self.config_manager.config["model"]["compute_type"] = "int8"
