@@ -107,11 +107,73 @@ else
     INDEX_URL="https://download.pytorch.org/whl/cpu"
 fi
 
-# 3. Install/Upgrade Witticism (idempotent)
-echo "📦 Installing/upgrading Witticism to latest version..."
-echo "⏳ This may take several minutes as PyTorch and WhisperX are large packages"
-echo ""
-pipx install --force witticism --verbose --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple --verbose"
+# 3. Install/Upgrade Witticism (smart upgrade)
+echo "📦 Checking current Witticism installation..."
+
+# Check if witticism is installed and get version info
+CURRENT_VERSION=""
+PYTORCH_VERSION=""
+NEEDS_REINSTALL=false
+
+if pipx list | grep -q "package witticism"; then
+    echo "✓ Witticism is already installed"
+    
+    # Get current version
+    CURRENT_VERSION=$(pipx list | grep -A1 "package witticism" | grep "version" | sed 's/.*version \([^,]*\).*/\1/')
+    echo "  Current version: $CURRENT_VERSION"
+    
+    # Check PyTorch version in the pipx environment
+    PYTORCH_CHECK=$(pipx run --spec witticism python -c "import torch; print(torch.__version__)" 2>/dev/null || echo "")
+    if [ -n "$PYTORCH_CHECK" ]; then
+        PYTORCH_VERSION="$PYTORCH_CHECK"
+        echo "  Current PyTorch version: $PYTORCH_VERSION"
+        
+        # Check if PyTorch version is compatible (>=2.0.0,<2.4.0)
+        if python3 -c "
+import sys
+version = '$PYTORCH_VERSION'.split('+')[0]  # Remove +cu118 suffix if present
+major, minor = map(int, version.split('.')[:2])
+if major < 2 or (major == 2 and minor >= 4):
+    sys.exit(1)
+"; then
+            echo "  PyTorch version is compatible"
+        else
+            echo "  ⚠️  PyTorch version needs updating"
+            NEEDS_REINSTALL=true
+        fi
+    else
+        echo "  ⚠️  Could not check PyTorch version"
+        NEEDS_REINSTALL=true
+    fi
+    
+    # Check for latest witticism version
+    LATEST_VERSION=$(python3 -c "
+import urllib.request, json
+try:
+    response = urllib.request.urlopen('https://pypi.org/pypi/witticism/json')
+    data = json.loads(response.read())
+    print(data['info']['version'])
+except:
+    print('unknown')
+" 2>/dev/null)
+    
+    if [ "$LATEST_VERSION" != "unknown" ] && [ "$LATEST_VERSION" != "$CURRENT_VERSION" ]; then
+        echo "  📦 New version available: $LATEST_VERSION"
+        echo "🔄 Upgrading Witticism (preserving compatible PyTorch)..."
+        pipx upgrade witticism --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple"
+    elif [ "$NEEDS_REINSTALL" = true ]; then
+        echo "🔄 Reinstalling due to PyTorch compatibility..."
+        echo "⏳ This may take several minutes as PyTorch needs to be updated"
+        pipx install --force witticism --verbose --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple --verbose"
+    else
+        echo "✓ Witticism is up to date with compatible PyTorch"
+    fi
+else
+    echo "📦 Installing Witticism for the first time..."
+    echo "⏳ This may take several minutes as PyTorch and WhisperX are large packages"
+    echo ""
+    pipx install witticism --verbose --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple --verbose"
+fi
 
 # 4. Install icons from package
 echo "🎨 Setting up application icons..."
