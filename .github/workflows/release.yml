@@ -37,13 +37,13 @@ jobs:
       run: python -m build
     
     - name: Publish to PyPI
-      if: startsWith(github.ref, 'refs/tags/v')
+      if: startsWith(github.ref, 'refs/tags/')
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
         verbose: true
     
     - name: Create GitHub Release
-      if: startsWith(github.ref, 'refs/tags/v')
+      if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v1
       with:
         files: |
