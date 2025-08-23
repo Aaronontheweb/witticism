@@ -675,7 +675,7 @@ class WhisperXEngine:
                 
             # Test 1: Basic tensor operation
             test_tensor = torch.randn(100, device='cuda')
-            result = test_tensor.sum().item()
+            test_tensor.sum().item()  # Force computation to test GPU
             torch.cuda.synchronize()
             del test_tensor
             
