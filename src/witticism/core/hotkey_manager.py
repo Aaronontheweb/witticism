@@ -22,9 +22,9 @@ class HotkeyManager:
         if config_manager:
             ptt_key_str = config_manager.get("hotkeys.push_to_talk", "f9")
             if self.update_hotkey_from_string(ptt_key_str):
-                logger.info(f"Using configured PTT key: {ptt_key_str}")
+                logger.info(f"[HOTKEY_MANAGER] CONFIG_PTT_KEY: using configured PTT key '{ptt_key_str}'")
             else:
-                logger.warning(f"Invalid PTT key '{ptt_key_str}' in config, using default F9")
+                logger.warning(f"[HOTKEY_MANAGER] INVALID_PTT_KEY: invalid PTT key '{ptt_key_str}' in config, using default F9")
 
         self.ptt_active = False
 
@@ -49,7 +49,7 @@ class HotkeyManager:
 
     def start(self):
         if self.listener:
-            logger.warning("HotkeyManager already started")
+            logger.warning("[HOTKEY_MANAGER] ALREADY_STARTED: HotkeyManager already started")
             return
 
         # Create listener for push-to-talk
@@ -98,7 +98,7 @@ class HotkeyManager:
                     self.on_toggle()
 
         except Exception as e:
-            logger.error(f"Error in key press handler: {e}")
+            logger.error(f"[HOTKEY_MANAGER] KEY_PRESS_ERROR: error in key press handler - {e}")
 
     def _on_key_release(self, key):
         try:
@@ -124,7 +124,7 @@ class HotkeyManager:
             self.current_keys.discard(key)
 
         except Exception as e:
-            logger.error(f"Error in key release handler: {e}")
+            logger.error(f"[HOTKEY_MANAGER] KEY_RELEASE_ERROR: error in key release handler - {e}")
 
     def _is_combo_pressed(self, *keys):
         for key in keys:

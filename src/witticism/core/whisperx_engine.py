@@ -267,7 +267,7 @@ class WhisperXEngine:
                 logger.info(f"[WHISPERX_ENGINE] DIARIZATION_LOADED: diarization model loaded in {diarize_load_time:.2f}s")
 
             self._update_progress("Models loaded successfully", 100)
-            logger.info("All models loaded successfully")
+            logger.info("[WHISPERX_ENGINE] ALL_MODELS_LOADED: all models loaded successfully")
 
         except Exception as e:
             if not self.loading_cancelled:
@@ -311,7 +311,7 @@ class WhisperXEngine:
 
                         self._update_progress("Loading alignment model on CPU...", 50)
 
-                        logger.info(f"Loading alignment model on CPU for language: {self.language}")
+                        logger.info(f"[WHISPERX_ENGINE] CPU_ALIGN_LOADING: alignment model for language '{self.language}' on CPU")
                         self.align_model, self.metadata = whisperx.load_align_model(
                             language_code=self.language,
                             device=self.device
@@ -324,7 +324,7 @@ class WhisperXEngine:
 
                         # Optionally load diarization model
                         if self.enable_diarization and self.hf_token:
-                            logger.info("Loading diarization model on CPU")
+                            logger.info("[WHISPERX_ENGINE] CPU_DIARIZATION_LOADING: diarization model on CPU")
                             self.diarize_model = whisperx.DiarizationPipeline(
                                 use_auth_token=self.hf_token,
                                 device=self.device
@@ -335,11 +335,11 @@ class WhisperXEngine:
                         return
 
                     except Exception as cpu_error:
-                        logger.error(f"CPU fallback also failed: {cpu_error}")
+                        logger.error(f"[WHISPERX_ENGINE] CPU_FALLBACK_FAILED: CPU fallback also failed - error='{cpu_error}'")
                         self._update_progress("Both CUDA and CPU loading failed", 0)
                         raise cpu_error
                 else:
-                    logger.error(f"Failed to load models: {e}")
+                    logger.error(f"[WHISPERX_ENGINE] MODEL_LOADING_FAILED: failed to load models - error='{e}'")
                     self._update_progress(f"Loading failed: {str(e)}", 0)
                     raise
 
@@ -353,7 +353,7 @@ class WhisperXEngine:
     def cancel_loading(self):
         """Cancel ongoing model loading."""
         self.loading_cancelled = True
-        logger.info("Model loading cancelled by user")
+        logger.info("[WHISPERX_ENGINE] LOADING_CANCELLED: model loading cancelled by user")
 
     def is_loading(self) -> bool:
         """Check if models are currently loading."""
