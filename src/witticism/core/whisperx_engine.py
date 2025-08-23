@@ -10,12 +10,12 @@ try:
     import whisperx
     WHISPERX_AVAILABLE = True
     logger = logging.getLogger(__name__)
-    logger.info("WhisperX library loaded successfully")
+    logger.info("[WHISPERX_ENGINE] LIBRARY_LOADED: WhisperX library loaded successfully")
 except ImportError:
     from . import mock_whisperx as whisperx
     WHISPERX_AVAILABLE = False
     logger = logging.getLogger(__name__)
-    logger.warning("WhisperX not available, using mock implementation for testing")
+    logger.warning("[WHISPERX_ENGINE] MOCK_MODE: WhisperX not available, using mock implementation for testing")
 
     # Mock torch for device detection
     class MockTorch:
@@ -159,7 +159,7 @@ class WhisperXEngine:
                 logger.debug("[WHISPERX_ENGINE] CUDA_CLEANUP: nuclear cleanup completed")
 
         except Exception as e:
-            logger.warning(f"Nuclear CUDA cleanup error (continuing): {e}")
+            logger.warning(f"[WHISPERX_ENGINE] CLEANUP_ERROR: nuclear CUDA cleanup error (continuing) - {e}")
 
         # Force garbage collection multiple times
         import gc
@@ -185,22 +185,22 @@ class WhisperXEngine:
 
             if self.loading_thread.is_alive():
                 self.loading_cancelled = True
-                logger.warning(f"Model loading timed out after {timeout}s, attempting fallback")
+                logger.warning(f"[WHISPERX_ENGINE] LOADING_TIMEOUT: model loading timed out after {timeout}s, attempting fallback")
                 self._update_progress("Loading timed out, trying fallback...", 0)
 
                 # Try fallback model
                 if self.model_size != self.fallback_model:
-                    logger.info(f"Falling back to {self.fallback_model} model")
+                    logger.info(f"[WHISPERX_ENGINE] MODEL_FALLBACK: falling back to {self.fallback_model} model")
                     original_model = self.model_size
                     self.model_size = self.fallback_model
 
                     try:
                         self._load_models_sync()
-                        logger.info(f"Successfully loaded fallback model: {self.fallback_model}")
+                        logger.info(f"[WHISPERX_ENGINE] FALLBACK_SUCCESS: successfully loaded fallback model '{self.fallback_model}'")
                         self._update_progress(f"Loaded {self.fallback_model} (fallback)", 100)
                         return
                     except Exception as fallback_error:
-                        logger.error(f"Fallback model loading failed: {fallback_error}")
+                        logger.error(f"[WHISPERX_ENGINE] FALLBACK_FAILED: fallback model loading failed - {fallback_error}")
                         self.model_size = original_model
                         raise TimeoutError(f"Model loading timed out after {timeout}s and fallback failed")
                 else:
@@ -215,7 +215,7 @@ class WhisperXEngine:
             self._load_models_sync()
         except Exception as e:
             if not self.loading_cancelled:
-                logger.error(f"Model loading failed: {e}")
+                logger.error(f"[WHISPERX_ENGINE] LOADING_FAILED: model loading failed - {e}")
                 raise
 
     def _load_models_sync(self):
@@ -456,11 +456,11 @@ class WhisperXEngine:
                     return result
 
                 except Exception as recovery_error:
-                    logger.error(f"Failed to recover from CUDA error: {recovery_error}")
+                    logger.error(f"[WHISPERX_ENGINE] RECOVERY_FAILED: failed to recover from CUDA error - {recovery_error}")
                     self.cuda_fallback = True  # Mark fallback even if recovery had issues
                     raise e
             else:
-                logger.error(f"Transcription failed: {e}")
+                logger.error(f"[WHISPERX_ENGINE] TRANSCRIPTION_FAILED: transcription failed - {e}")
                 raise
 
     def transcribe_with_timing(

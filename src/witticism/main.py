@@ -48,7 +48,7 @@ def ensure_single_instance():
         lock_file.write(str(os.getpid()))
         lock_file.flush()
 
-        logger.info(f"Acquired singleton lock: {lock_file_path}")
+        logger.info(f"[WITTICISM] SINGLETON_LOCK: acquired singleton lock at {lock_file_path}")
         return lock_file  # Keep this alive to maintain lock
 
     except (IOError, OSError) as e:
@@ -65,7 +65,7 @@ def ensure_single_instance():
                     try:
                         os.kill(old_pid, 0)  # Signal 0 just tests if process exists
                         # Process exists - show user message
-                        logger.error(f"Another Witticism instance is running (PID {old_pid})")
+                        logger.error(f"[WITTICISM] INSTANCE_RUNNING: another Witticism instance is running (PID {old_pid})")
                         QMessageBox.information(
                             None,
                             "Witticism Already Running",
@@ -76,7 +76,7 @@ def ensure_single_instance():
 
                     except OSError:
                         # Process doesn't exist - zombie lock file
-                        logger.warning(f"Cleaning up zombie lock file (dead PID {old_pid})")
+                        logger.warning(f"[WITTICISM] ZOMBIE_CLEANUP: cleaning up zombie lock file (dead PID {old_pid})")
                         os.unlink(lock_file_path)
 
                         # Retry lock acquisition
@@ -84,7 +84,7 @@ def ensure_single_instance():
 
             except (ValueError, FileNotFoundError):
                 # Corrupted or missing lock file - clean it up
-                logger.warning("Cleaning up corrupted lock file")
+                logger.warning("[WITTICISM] LOCK_CLEANUP: cleaning up corrupted lock file")
                 try:
                     os.unlink(lock_file_path)
                 except OSError:
@@ -92,7 +92,7 @@ def ensure_single_instance():
                 return ensure_single_instance()
 
         # Default fallback - couldn't determine state
-        logger.error(f"Could not acquire singleton lock: {e}")
+        logger.error(f"[WITTICISM] LOCK_FAILED: could not acquire singleton lock - {e}")
         return None
 
 
@@ -203,7 +203,7 @@ class WitticismApp:
             logger.info("[WITTICISM] INIT_COMPLETE: all components initialized successfully")
 
         except Exception as e:
-            logger.error(f"Failed to initialize components: {e}")
+            logger.error(f"[WITTICISM] INIT_FAILED: failed to initialize components - {e}")
             raise
 
     def setup_connections(self):
@@ -262,7 +262,7 @@ class WitticismApp:
             self.initialize_components()
         except Exception as e:
             error_msg = str(e)
-            logger.error(f"Initialization failed: {error_msg}")
+            logger.error(f"[WITTICISM] INITIALIZATION_FAILED: {error_msg}")
 
             # Check if this is a CUDA-related error that we can recover from
             if ("CUDA" in error_msg or "cuda" in error_msg or
@@ -311,12 +311,12 @@ class WitticismApp:
         sys.exit(app.exec_())
 
     def signal_handler(self, signum, frame):
-        logger.info(f"Received signal {signum}, shutting down...")
+        logger.info(f"[WITTICISM] SIGNAL_RECEIVED: received signal {signum}, shutting down")
         self.cleanup()
         QApplication.quit()
 
     def cleanup(self):
-        logger.info("Cleaning up...")
+        logger.info("[WITTICISM] CLEANUP_START: cleaning up components")
 
         if self.hotkey_manager:
             self.hotkey_manager.stop()
@@ -330,7 +330,7 @@ class WitticismApp:
         if self.engine:
             self.engine.cleanup()
 
-        logger.info("Cleanup complete")
+        logger.info("[WITTICISM] CLEANUP_COMPLETE: all components cleaned up successfully")
 
 
 def main():
