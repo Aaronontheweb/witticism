@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.5] - 2025-08-23
+
+### Fixed
+- **CRITICAL**: Enhanced CUDA suspend/resume crash protection with comprehensive startup health checks
+- Added startup CUDA context validation to prevent crashes from previous suspend/resume corruption
+- Fixed install.sh version extraction hanging issue that prevented script completion
+- Implemented graceful CPU fallback instead of hard crashes when CUDA context is corrupted
+- Added singleton instance protection with automatic zombie lock file cleanup
+
+### Improved
+- Application now performs nuclear CUDA cleanup at startup if context is corrupted
+- Install script now properly extracts version information without hanging
+- Enhanced initialization flow prevents crashes before sleep monitor activation
+- Better error handling that maintains application stability during CUDA failures
+
 ## [0.4.4] - 2025-08-23
 
 ### Fixed
@@ -190,7 +205,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Audio device selection
 - Configuration persistence
 
-[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/0.4.4...HEAD
+[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/0.4.5...HEAD
+[0.4.5]: https://github.com/Aaronontheweb/witticism/compare/0.4.4...0.4.5
 [0.4.4]: https://github.com/Aaronontheweb/witticism/compare/0.4.3...0.4.4
 [0.4.3]: https://github.com/Aaronontheweb/witticism/compare/v0.4.2...0.4.3
 [0.4.2]: https://github.com/Aaronontheweb/witticism/compare/v0.4.1...v0.4.2
