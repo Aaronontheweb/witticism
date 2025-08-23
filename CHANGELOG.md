@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.4] - 2025-08-23
+
+### Fixed
+- **CRITICAL**: Resolved persistent SIGABRT crashes during laptop suspend/resume cycles with CUDA systems
+- Implemented comprehensive solution using systemd inhibitor locks to prevent kernel/userspace timing race conditions
+- Added nuclear GPU cleanup with complete model destruction before system suspend
+- Enhanced CUDA health testing and background model restoration after resume
+- Fixed fundamental issue where previous recovery attempts failed because kernel had already invalidated CUDA contexts
+
+### Improved
+- Proactive suspend/resume handling with guaranteed cleanup time using systemd inhibitors
+- Smart fallback to CPU mode when GPU recovery fails, maintaining application stability
+- Background model restoration that doesn't block system resume process
+
 ## [0.4.3] - 2025-08-22
 
 ### Added
@@ -176,8 +190,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Audio device selection
 - Configuration persistence
 
-[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/v0.4.3...HEAD
-[0.4.3]: https://github.com/Aaronontheweb/witticism/compare/v0.4.2...v0.4.3
+[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/0.4.4...HEAD
+[0.4.4]: https://github.com/Aaronontheweb/witticism/compare/0.4.3...0.4.4
+[0.4.3]: https://github.com/Aaronontheweb/witticism/compare/v0.4.2...0.4.3
 [0.4.2]: https://github.com/Aaronontheweb/witticism/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/Aaronontheweb/witticism/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Aaronontheweb/witticism/compare/v0.3.0...v0.4.0
