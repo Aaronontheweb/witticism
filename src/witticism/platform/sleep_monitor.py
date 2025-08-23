@@ -43,7 +43,7 @@ class LinuxDBusSleepMonitor(SleepMonitor):
             from pydbus import SystemBus
             self.bus = SystemBus()
             self.login_manager = self.bus.get("org.freedesktop.login1")
-            logger.info("DBus sleep monitoring initialized")
+            logger.info("[SLEEP_MONITOR] INIT: DBus sleep monitoring initialized")
         except ImportError:
             logger.error("pydbus not available - cannot monitor sleep events")
             raise
@@ -52,24 +52,26 @@ class LinuxDBusSleepMonitor(SleepMonitor):
         if not self._monitoring:
             self.login_manager.PrepareForSleep.connect(self._on_prepare_for_sleep)
             self._monitoring = True
-            logger.info("Started DBus sleep monitoring")
+            logger.info("[SLEEP_MONITOR] STARTED: DBus PrepareForSleep signal monitoring active")
 
     def stop_monitoring(self) -> None:
         if self._monitoring:
             # Note: pydbus doesn't have easy disconnect, but this is fine for our use case
             self._monitoring = False
-            logger.info("Stopped DBus sleep monitoring")
+            logger.info("[SLEEP_MONITOR] STOPPED: DBus sleep monitoring deactivated")
 
     def is_monitoring(self) -> bool:
         return self._monitoring
 
     def _on_prepare_for_sleep(self, suspending: bool):
         """Handle DBus PrepareForSleep signal"""
+        import time
+        timestamp = time.strftime("%H:%M:%S", time.localtime())
         if suspending:
-            logger.info("System is suspending")
+            logger.info(f"[SLEEP_MONITOR] SUSPEND_DETECTED: system entering sleep state at {timestamp}")
             self.on_suspend()
         else:
-            logger.info("System resumed from suspend")
+            logger.info(f"[SLEEP_MONITOR] RESUME_DETECTED: system waking from sleep state at {timestamp}")
             self.on_resume()
 
 
@@ -92,26 +94,28 @@ class SystemdInhibitorSleepMonitor(LinuxDBusSleepMonitor):
 
     def _on_prepare_for_sleep(self, suspending: bool):
         """Handle DBus PrepareForSleep signal with inhibitor protection"""
+        import time
+        timestamp = time.strftime("%H:%M:%S", time.localtime())
         if suspending:
-            logger.info("Suspend detected - acquiring inhibitor lock for CUDA cleanup")
+            logger.info(f"[SLEEP_MONITOR] SUSPEND_WITH_INHIBITOR: acquiring lock for CUDA cleanup at {timestamp}")
 
             # CRITICAL: Start inhibitor BEFORE cleanup to delay suspend
             inhibitor_acquired = self._acquire_inhibitor()
 
             try:
                 # Now we have guaranteed time to clean up safely
-                logger.info("Performing CUDA cleanup with suspend protection")
+                logger.info(f"[SLEEP_MONITOR] PROTECTED_CLEANUP: performing CUDA cleanup with {self.cleanup_timeout}s protection")
                 self.on_suspend()
-                logger.info("CUDA cleanup completed - releasing inhibitor")
+                logger.info("[SLEEP_MONITOR] CLEANUP_COMPLETE: releasing inhibitor to allow suspend")
             except Exception as e:
-                logger.error(f"Suspend cleanup failed: {e}")
+                logger.error(f"[SLEEP_MONITOR] CLEANUP_ERROR: suspend cleanup failed - {e}")
             finally:
                 # ALWAYS release lock, even on failure - system must be able to suspend
                 if inhibitor_acquired:
                     self._release_inhibitor()
 
         else:
-            logger.info("System resumed from suspend")
+            logger.info(f"[SLEEP_MONITOR] RESUME_WITH_INHIBITOR: system resumed from suspend at {timestamp}")
             self.on_resume()
 
     def _acquire_inhibitor(self) -> bool:
@@ -126,10 +130,10 @@ class SystemdInhibitorSleepMonitor(LinuxDBusSleepMonitor):
                 'sleep', str(self.cleanup_timeout)
             ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-            logger.debug(f"Acquired suspend inhibitor (max {self.cleanup_timeout}s delay)")
+            logger.debug(f"[SLEEP_MONITOR] INHIBITOR_ACQUIRED: systemd inhibitor active (max {self.cleanup_timeout}s delay)")
             return True
         except Exception as e:
-            logger.error(f"Failed to acquire suspend inhibitor: {e}")
+            logger.error(f"[SLEEP_MONITOR] INHIBITOR_FAILED: could not acquire suspend inhibitor - {e}")
             return False
 
     def _release_inhibitor(self):
@@ -147,7 +151,7 @@ class SystemdInhibitorSleepMonitor(LinuxDBusSleepMonitor):
                 logger.warning(f"Error releasing inhibitor: {e}")
             finally:
                 self.inhibitor_process = None
-                logger.debug("Released suspend inhibitor")
+                logger.debug("[SLEEP_MONITOR] INHIBITOR_RELEASED: systemd inhibitor terminated, suspend allowed")
 
     def stop_monitoring(self) -> None:
         """Stop monitoring and clean up any active inhibitor"""
@@ -169,11 +173,11 @@ class MockSleepMonitor(SleepMonitor):
 
     def start_monitoring(self) -> None:
         self._monitoring = True
-        logger.debug("Started mock sleep monitoring")
+        logger.debug("[SLEEP_MONITOR] MOCK_STARTED: mock sleep monitoring for testing")
 
     def stop_monitoring(self) -> None:
         self._monitoring = False
-        logger.debug("Stopped mock sleep monitoring")
+        logger.debug("[SLEEP_MONITOR] MOCK_STOPPED: mock sleep monitoring deactivated")
 
     def is_monitoring(self) -> bool:
         return self._monitoring
@@ -182,14 +186,14 @@ class MockSleepMonitor(SleepMonitor):
     def simulate_suspend(self):
         """Test method to simulate suspend event"""
         if self._monitoring:
-            logger.debug("Simulating suspend event")
+            logger.debug("[SLEEP_MONITOR] MOCK_SUSPEND: simulating suspend event for testing")
             self.suspend_calls.append(True)
             self.on_suspend()
 
     def simulate_resume(self):
         """Test method to simulate resume event"""
         if self._monitoring:
-            logger.debug("Simulating resume event")
+            logger.debug("[SLEEP_MONITOR] MOCK_RESUME: simulating resume event for testing")
             self.resume_calls.append(True)
             self.on_resume()
 
@@ -199,7 +203,7 @@ def create_sleep_monitor(on_suspend: Callable[[], None], on_resume: Callable[[],
 
     # Force mock in test environments
     if _is_test_environment():
-        logger.info("Creating mock sleep monitor for testing")
+        logger.info("[SLEEP_MONITOR] FACTORY: creating mock monitor for test environment")
         return MockSleepMonitor(on_suspend, on_resume)
 
     system = platform.system().lower()
@@ -209,21 +213,21 @@ def create_sleep_monitor(on_suspend: Callable[[], None], on_resume: Callable[[],
             # Try enhanced monitor with systemd inhibitor support first
             monitor = SystemdInhibitorSleepMonitor(on_suspend, on_resume)
             if monitor._check_inhibitor_support():
-                logger.info("Creating systemd inhibitor sleep monitor (CUDA protection)")
+                logger.info("[SLEEP_MONITOR] FACTORY: creating systemd inhibitor monitor with CUDA protection")
                 return monitor
             else:
-                logger.warning("Systemd inhibitors not available - using basic DBus monitor")
+                logger.warning("[SLEEP_MONITOR] FACTORY: systemd inhibitors not available - using basic DBus monitor")
                 return LinuxDBusSleepMonitor(on_suspend, on_resume)
         except ImportError:
-            logger.warning("DBus not available, sleep monitoring disabled")
+            logger.warning("[SLEEP_MONITOR] FACTORY: DBus not available, sleep monitoring disabled")
     elif system == "darwin":
         # TODO: Implement MacOS monitoring
-        logger.warning("MacOS sleep monitoring not yet implemented")
+        logger.warning("[SLEEP_MONITOR] FACTORY: MacOS sleep monitoring not yet implemented")
     elif system == "windows":
         # TODO: Implement Windows monitoring
-        logger.warning("Windows sleep monitoring not yet implemented")
+        logger.warning("[SLEEP_MONITOR] FACTORY: Windows sleep monitoring not yet implemented")
     else:
-        logger.warning(f"Sleep monitoring not supported on {system}")
+        logger.warning(f"[SLEEP_MONITOR] FACTORY: sleep monitoring not supported on {system}")
 
     # Return None for unsupported platforms or failed imports
     # The application should handle None gracefully
