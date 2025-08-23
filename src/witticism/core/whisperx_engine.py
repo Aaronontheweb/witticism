@@ -88,7 +88,9 @@ class WhisperXEngine:
         # Sleep monitoring
         self.sleep_monitor = None
         self.suspend_recovery_attempts = 0
+        self._suspend_state = None  # Store model state during suspend
         self.resume_validation_attempts = 0
+        self.suspend_resume_callback = None  # Callback for suspend/resume events
 
         logger.info(f"WhisperX Engine initialized: device={self.device}, compute_type={self.compute_type}")
 
@@ -534,6 +536,10 @@ class WhisperXEngine:
         except Exception as e:
             logger.error(f"Failed to enable sleep monitoring: {e}")
 
+    def set_suspend_resume_callback(self, callback):
+        """Set callback for suspend/resume events. Callback receives (event_type, details)."""
+        self.suspend_resume_callback = callback
+
     def disable_sleep_monitoring(self):
         """Disable sleep/resume monitoring"""
         if self.sleep_monitor:
@@ -545,57 +551,227 @@ class WhisperXEngine:
                 logger.error(f"Failed to disable sleep monitoring: {e}")
 
     def _on_system_suspend(self):
-        """Handle system suspend event - proactively clear GPU contexts"""
-        logger.info("System suspend detected - performing proactive GPU cleanup")
+        """Handle system suspend event - NUCLEAR GPU abandonment to prevent SIGABRT"""
+        logger.warning("System suspend detected - performing EMERGENCY GPU abandonment")
         self.suspend_recovery_attempts += 1
 
         try:
-            if self.device == "cuda":
-                # Clear models before suspend to avoid context corruption
-                logger.debug("Clearing GPU models and cache before suspend")
+            if self.device == "cuda" and self.is_loaded():
+                # Store current state for potential restoration after resume
+                self._suspend_state = {
+                    'model_size': self.model_size,
+                    'language': self.language,
+                    'enable_diarization': self.enable_diarization,
+                    'hf_token': self.hf_token,
+                    'device': self.device,
+                    'compute_type': self.compute_type
+                }
+                
+                logger.warning("NUCLEAR GPU CLEANUP - destroying all models and contexts")
+                
+                # NUCLEAR: Complete model destruction
+                if self.model:
+                    try:
+                        del self.model
+                    except Exception as e:
+                        logger.debug(f"Error deleting model: {e}")
+                    finally:
+                        self.model = None
+                    
+                if self.align_model:
+                    try:
+                        del self.align_model
+                    except Exception as e:
+                        logger.debug(f"Error deleting align_model: {e}")
+                    finally:
+                        self.align_model = None
+                    
+                if self.diarize_model:
+                    try:
+                        del self.diarize_model
+                    except Exception as e:
+                        logger.debug(f"Error deleting diarize_model: {e}")
+                    finally:
+                        self.diarize_model = None
+                    
+                if self.metadata:
+                    self.metadata = None
 
-                # Clear GPU memory cache
+                # NUCLEAR: Force CUDA context destruction
                 if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+                    try:
+                        torch.cuda.empty_cache()
+                        torch.cuda.synchronize()
+                        # Force PyTorch to release all CUDA memory allocations
+                        torch.cuda.reset_peak_memory_stats()
+                        # Additional aggressive cleanup
+                        torch.cuda.ipc_collect()
+                        logger.debug("CUDA contexts aggressively cleared")
+                    except Exception as e:
+                        logger.warning(f"CUDA cleanup error (continuing): {e}")
+                
+                # Force garbage collection multiple times
+                import gc
+                for _ in range(3):  # Multiple GC passes for thorough cleanup
+                    gc.collect()
 
-                # Note: We don't unload models here as that would be disruptive
-                # Instead, we'll validate and recover on resume if needed
-                logger.info("Proactive suspend cleanup completed")
+                logger.warning("NUCLEAR GPU ABANDONMENT COMPLETE - models destroyed, contexts cleared")
+            else:
+                logger.debug("No GPU models loaded or not using CUDA - suspend cleanup skipped")
 
         except Exception as e:
-            logger.error(f"Error during proactive suspend cleanup: {e}")
+            logger.error(f"Error during emergency suspend cleanup: {e}")
+            # Continue anyway - partial cleanup better than SIGABRT crash
 
     def _on_system_resume(self):
-        """Handle system resume event - validate GPU contexts"""
-        logger.info("System resume detected - validating GPU contexts")
+        """Handle system resume event - test CUDA health and restore models if safe"""
+        logger.info("System resume detected - performing CUDA health assessment")
         self.resume_validation_attempts += 1
 
         try:
-            if self.device == "cuda":
-                # Test CUDA context after resume
-                if self._validate_cuda_context():
-                    logger.info("GPU context validation successful after resume")
+            # Check if we have suspend state and models were unloaded
+            if hasattr(self, '_suspend_state') and self._suspend_state:
+                logger.info("Found suspended state - testing CUDA recovery")
+                
+                # Comprehensive CUDA health test
+                if self._test_cuda_health():
+                    logger.info("CUDA healthy after resume - initiating model restoration")
+                    
+                    # Restore models in background to avoid blocking resume
+                    import threading
+                    restore_thread = threading.Thread(
+                        target=self._restore_models_background, 
+                        daemon=True,
+                        name="witticism-model-restore"
+                    )
+                    restore_thread.start()
+                    
                 else:
-                    logger.warning("GPU context invalid after resume - will recover on next use")
+                    logger.warning("CUDA unhealthy after resume - permanent CPU fallback")
+                    self._force_cpu_fallback_after_suspend()
+                    self._suspend_state = None
+                    
+            elif self.device == "cuda" and self.is_loaded():
+                # Models are still loaded, test CUDA health
+                if self._test_cuda_health():
+                    logger.info("GPU context healthy after resume")
+                else:
+                    logger.warning("GPU context damaged after resume - will recover on next use")
+            else:
+                logger.debug("No models to restore or not using CUDA")
 
         except Exception as e:
-            logger.error(f"Error during resume validation: {e}")
+            logger.error(f"Error during resume processing: {e}")
+            # Clear suspend state on error
+            if hasattr(self, '_suspend_state'):
+                self._suspend_state = None
 
-    def _validate_cuda_context(self) -> bool:
-        """Validate CUDA context without disrupting models"""
+    def _test_cuda_health(self) -> bool:
+        """Comprehensive CUDA health check after resume - more thorough than basic validation"""
         try:
-            if torch.cuda.is_available():
-                # Simple CUDA operation to test context
-                test_tensor = torch.tensor([1.0], device='cuda')
-                torch.cuda.synchronize()
-                del test_tensor
-                torch.cuda.empty_cache()
-                return True
+            if not torch.cuda.is_available():
+                logger.debug("torch.cuda.is_available() returned False")
+                return False
+                
+            # Test 1: Basic tensor operation
+            test_tensor = torch.randn(100, device='cuda')
+            result = test_tensor.sum().item()
+            torch.cuda.synchronize()
+            del test_tensor
+            
+            # Test 2: Memory allocation and cleanup
+            large_tensor = torch.zeros(1000, 1000, device='cuda')
+            del large_tensor
+            torch.cuda.empty_cache()
+            
+            # Test 3: Multiple GPU operations
+            for _ in range(3):
+                x = torch.randn(50, device='cuda')
+                y = torch.randn(50, device='cuda')
+                z = x @ y
+                del x, y, z
+            
+            torch.cuda.synchronize()
+            logger.debug("CUDA health check passed - GPU is fully functional")
+            return True
+            
         except Exception as e:
-            logger.warning(f"CUDA context validation failed: {e}")
+            logger.warning(f"CUDA health check failed: {e}")
             return False
 
-        return False
+    def _force_cpu_fallback_after_suspend(self):
+        """Force permanent CPU mode after suspend when CUDA is damaged"""
+        logger.warning("Forcing CPU fallback - CUDA damaged by suspend/resume")
+        self.device = "cpu"
+        self.compute_type = "int8" 
+        self.cuda_fallback = True
+        # Reset any CUDA-related state
+        if hasattr(self, '_suspend_state'):
+            self._suspend_state = None
+
+    def _restore_models_background(self):
+        """Background method to restore models after resume - non-blocking"""
+        try:
+            if not hasattr(self, '_suspend_state') or not self._suspend_state:
+                logger.warning("No suspend state available for model restoration")
+                return
+                
+            logger.info("Starting background model restoration after resume")
+            suspend_state = self._suspend_state
+            
+            # Double-check CUDA health before proceeding
+            if not self._test_cuda_health():
+                logger.error("CUDA health deteriorated during restoration - aborting")
+                self._force_cpu_fallback_after_suspend()
+                return
+            
+            # Restore models with the same parameters as before suspend
+            try:
+                logger.info(f"Restoring WhisperX model: {suspend_state['model_size']} on {suspend_state['device']}")
+                
+                # Load main whisper model
+                self.model = whisperx.load_model(
+                    suspend_state['model_size'],
+                    suspend_state['device'],
+                    compute_type=suspend_state['compute_type'],
+                    language=suspend_state['language']
+                )
+                
+                # Verify model loaded successfully
+                if self.model is None:
+                    raise RuntimeError("WhisperX model failed to load")
+                
+                # Load alignment model
+                logger.info("Restoring alignment model")
+                self.align_model, self.metadata = whisperx.load_align_model(
+                    language_code=suspend_state['language'],
+                    device=suspend_state['device']
+                )
+                
+                # Load diarization model if enabled
+                if suspend_state['enable_diarization'] and suspend_state['hf_token']:
+                    logger.info("Restoring diarization model")
+                    self.diarize_model = whisperx.DiarizationPipeline(
+                        use_auth_token=suspend_state['hf_token'],
+                        device=suspend_state['device']
+                    )
+                
+                # Final health check with restored models
+                if self._test_cuda_health():
+                    logger.info("Model restoration completed successfully - GPU fully operational")
+                    # Clear suspend state after successful restoration
+                    self._suspend_state = None
+                else:
+                    raise RuntimeError("CUDA health check failed with restored models")
+                
+            except Exception as e:
+                logger.error(f"Model restoration failed: {e}")
+                logger.warning("Falling back to CPU mode permanently")
+                self._force_cpu_fallback_after_suspend()
+                
+        except Exception as e:
+            logger.error(f"Unexpected error during background model restoration: {e}")
+            self._force_cpu_fallback_after_suspend()
 
     def get_sleep_monitoring_stats(self) -> Dict[str, Any]:
         """Get sleep monitoring statistics"""
