@@ -6,7 +6,7 @@ logger = logging.getLogger(__name__)
 
 
 class HotkeyManager:
-    def __init__(self):
+    def __init__(self, config_manager=None):
         self.listener = None
         self.hotkeys = {}
         self.current_keys = set()
@@ -17,15 +17,23 @@ class HotkeyManager:
         self.on_toggle = None
         self.on_toggle_dictation = None
 
-        # PTT state
-        self.ptt_key = keyboard.Key.f9
+        # PTT state - read from config or default to F9
+        self.ptt_key = keyboard.Key.f9  # default fallback
+        if config_manager:
+            ptt_key_str = config_manager.get("hotkeys.push_to_talk", "f9")
+            if self.update_hotkey_from_string(ptt_key_str):
+                logger.info(f"Using configured PTT key: {ptt_key_str}")
+            else:
+                logger.warning(f"Invalid PTT key '{ptt_key_str}' in config, using default F9")
+        
         self.ptt_active = False
 
         # Mode state
         self.mode = "push_to_talk"  # "push_to_talk" or "toggle"
         self.dictation_active = False
 
-        logger.info("HotkeyManager initialized")
+        ptt_key_name = getattr(self.ptt_key, 'name', str(self.ptt_key))
+        logger.info(f"[HOTKEY_MANAGER] INIT: mode={self.mode}, ptt_key={ptt_key_name}")
 
     def set_callbacks(
         self,
@@ -51,13 +59,13 @@ class HotkeyManager:
         )
         self.listener.start()
 
-        logger.info("HotkeyManager started")
+        logger.info("[HOTKEY_MANAGER] STARTED: keyboard listener active")
 
     def stop(self):
         if self.listener:
             self.listener.stop()
             self.listener = None
-            logger.info("HotkeyManager stopped")
+            logger.info("[HOTKEY_MANAGER] STOPPED: keyboard listener deactivated")
 
     def _on_key_press(self, key):
         try:
@@ -67,7 +75,8 @@ class HotkeyManager:
                     # Push-to-talk mode
                     if not self.ptt_active:
                         self.ptt_active = True
-                        logger.debug("PTT key pressed")
+                        ptt_key_name = getattr(self.ptt_key, 'name', str(self.ptt_key))
+                        logger.debug(f"[HOTKEY_MANAGER] PTT_START: {ptt_key_name} pressed - recording started")
                         if self.on_push_to_talk_start:
                             self.on_push_to_talk_start()
                 elif self.mode == "toggle":
@@ -84,7 +93,7 @@ class HotkeyManager:
                 keyboard.Key.alt_l,
                 keyboard.KeyCode.from_char('m')
             ):
-                logger.debug("Mode toggle hotkey pressed")
+                logger.debug("[HOTKEY_MANAGER] MODE_TOGGLE_COMBO: Ctrl+Alt+M pressed")
                 if self.on_toggle:
                     self.on_toggle()
 
@@ -178,8 +187,8 @@ class HotkeyManager:
 
 
 class GlobalHotkeyManager(HotkeyManager):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, config_manager=None):
+        super().__init__(config_manager)
         self.global_hotkeys = {}
 
     def register_global_hotkey(self, hotkey_str: str, callback: Callable):
