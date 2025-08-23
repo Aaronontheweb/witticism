@@ -723,7 +723,7 @@ class SystemTrayApp(QSystemTrayIcon):
         elif engine and hasattr(engine, 'startup_cuda_fixed') and engine.startup_cuda_fixed:
             if not self.cuda_error_shown:
                 QTimer.singleShot(1000, lambda: self.show_notification(
-                    "GPU Recovery Successful", 
+                    "GPU Recovery Successful",
                     "GPU context was corrupted at startup but has been restored.\n"
                     "Transcription will use GPU acceleration.",
                     duration=8000

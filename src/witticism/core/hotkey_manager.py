@@ -25,7 +25,7 @@ class HotkeyManager:
                 logger.info(f"Using configured PTT key: {ptt_key_str}")
             else:
                 logger.warning(f"Invalid PTT key '{ptt_key_str}' in config, using default F9")
-        
+
         self.ptt_active = False
 
         # Mode state
