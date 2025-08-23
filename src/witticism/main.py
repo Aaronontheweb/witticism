@@ -110,7 +110,7 @@ class WitticismApp:
             log_file = Path(self.config_manager.get("logging.file"))
         setup_logging(level=log_level, log_file=log_file)
 
-        logger.info("Witticism starting...")
+        logger.info(f"[WITTICISM] STARTUP: version={witticism.__version__}, args={vars(args)}")
 
         # Initialize components
         self.engine = None
@@ -124,7 +124,10 @@ class WitticismApp:
         try:
             # Initialize WhisperX engine
             model_size = self.args.model or self.config_manager.get("model.size", "base")
-            logger.info(f"Initializing WhisperX engine with model: {model_size}")
+            device = self.config_manager.get("model.device")
+            compute_type = self.config_manager.get("model.compute_type")
+            language = self.config_manager.get("model.language", "en")
+            logger.info(f"[WITTICISM] ENGINE_INIT: model_size={model_size}, device={device}, compute_type={compute_type}, language={language}")
 
             self.engine = WhisperXEngine(
                 model_size=model_size,
@@ -134,51 +137,70 @@ class WitticismApp:
             )
 
             # Perform startup CUDA health check and cleanup if needed
-            cuda_healthy = self.engine.validate_and_clean_cuda_at_startup()
-            if not cuda_healthy and self.engine.device == "cuda":
-                logger.warning("CUDA context corrupted - forcing CPU mode")
-                # Update engine configuration for CPU mode
-                self.engine.device = "cpu"
-                self.engine.compute_type = "int8"
-                # Update config manager to persist the change
-                self.config_manager.config["model"]["device"] = "cpu"
-                self.config_manager.config["model"]["compute_type"] = "int8"
+            if self.engine.device == "cuda":
+                logger.info("[WITTICISM] CUDA_VALIDATION: performing startup health check")
+                cuda_healthy = self.engine.validate_and_clean_cuda_at_startup()
+                if not cuda_healthy:
+                    logger.warning(f"[WITTICISM] STARTUP_CUDA_FALLBACK: CUDA unhealthy, switching from {self.engine.device} to CPU")
+                    # Update engine configuration for CPU mode
+                    self.engine.device = "cpu"
+                    self.engine.compute_type = "int8"
+                    self.engine.cuda_fallback = True  # Mark that we've fallen back due to startup CUDA issue
+                    # Update config manager to persist the change
+                    self.config_manager.config["model"]["device"] = "cpu"
+                    self.config_manager.config["model"]["compute_type"] = "int8"
+                    logger.info("[WITTICISM] CONFIG_UPDATED: device settings changed to CPU due to startup CUDA failure")
+                else:
+                    logger.info("[WITTICISM] CUDA_VALIDATION_PASSED: startup health check successful")
+            else:
+                logger.info(f"[WITTICISM] NON_CUDA_DEVICE: using {self.engine.device}, skipping CUDA validation")
 
             # Load models
-            logger.info("Loading WhisperX models...")
+            logger.info("[WITTICISM] MODEL_LOADING: starting WhisperX model loading")
             self.engine.load_models()
+            logger.info("[WITTICISM] MODEL_LOADING_COMPLETE: all models loaded successfully")
 
             # Enable sleep monitoring for proactive CUDA recovery
             try:
+                logger.info("[WITTICISM] SLEEP_MONITORING: enabling proactive suspend/resume detection")
                 self.engine.enable_sleep_monitoring()
             except Exception as e:
-                logger.warning(f"Sleep monitoring initialization failed: {e}")
+                logger.warning(f"[WITTICISM] SLEEP_MONITORING_FAILED: initialization failed - {e}")
                 # Not a fatal error - continue without sleep monitoring
 
             # Initialize audio capture
+            sample_rate = self.config_manager.get("audio.sample_rate", 16000)
+            channels = self.config_manager.get("audio.channels", 1)
+            vad_aggressiveness = self.config_manager.get("audio.vad_aggressiveness", 2)
+            logger.info(f"[WITTICISM] AUDIO_INIT: sample_rate={sample_rate}, channels={channels}, vad_aggressiveness={vad_aggressiveness}")
             self.audio_capture = PushToTalkCapture(
-                sample_rate=self.config_manager.get("audio.sample_rate", 16000),
-                channels=self.config_manager.get("audio.channels", 1),
-                vad_aggressiveness=self.config_manager.get("audio.vad_aggressiveness", 2)
+                sample_rate=sample_rate,
+                channels=channels,
+                vad_aggressiveness=vad_aggressiveness
             )
 
             # Initialize transcription pipeline
+            min_audio_length = self.config_manager.get("pipeline.min_audio_length", 0.5)
+            max_audio_length = self.config_manager.get("pipeline.max_audio_length", 30.0)
+            logger.info(f"[WITTICISM] PIPELINE_INIT: min_audio_length={min_audio_length}s, max_audio_length={max_audio_length}s")
             self.pipeline = TranscriptionPipeline(
                 self.engine,
-                min_audio_length=self.config_manager.get("pipeline.min_audio_length", 0.5),
-                max_audio_length=self.config_manager.get("pipeline.max_audio_length", 30.0)
+                min_audio_length=min_audio_length,
+                max_audio_length=max_audio_length
             )
             self.pipeline.start()
 
             # Initialize output manager
+            output_mode = self.config_manager.get("output.mode", "type")
+            logger.info(f"[WITTICISM] OUTPUT_INIT: mode={output_mode}")
             self.output_manager = OutputManager(
-                output_mode=self.config_manager.get("output.mode", "type")
+                output_mode=output_mode
             )
 
             # Initialize hotkey manager
-            self.hotkey_manager = HotkeyManager()
+            self.hotkey_manager = HotkeyManager(self.config_manager)
 
-            logger.info("All components initialized successfully")
+            logger.info("[WITTICISM] INIT_COMPLETE: all components initialized successfully")
 
         except Exception as e:
             logger.error(f"Failed to initialize components: {e}")
@@ -207,7 +229,7 @@ class WitticismApp:
 
     def _force_cpu_mode_and_retry(self):
         """Force CPU mode and retry initialization after CUDA failure"""
-        logger.warning("Forcing CPU mode due to CUDA initialization failure")
+        logger.warning("[WITTICISM] CUDA_FALLBACK_RETRY: forcing CPU mode due to initialization failure")
 
         # Update configuration to force CPU mode
         self.config_manager.config["model"]["device"] = "cpu"
@@ -245,14 +267,15 @@ class WitticismApp:
             # Check if this is a CUDA-related error that we can recover from
             if ("CUDA" in error_msg or "cuda" in error_msg or
                 "GPU" in error_msg or "torch" in error_msg):
-                logger.warning("CUDA-related initialization failure - attempting CPU fallback recovery")
+                logger.warning(f"[WITTICISM] CUDA_INIT_FAILURE: CUDA-related error detected - {error_msg[:100]}...")
+                logger.info("[WITTICISM] RECOVERY_ATTEMPT: attempting CPU fallback recovery")
 
                 try:
                     # Force CPU mode and retry initialization
                     self._force_cpu_mode_and_retry()
-                    logger.info("Successfully recovered using CPU fallback mode")
+                    logger.info("[WITTICISM] RECOVERY_SUCCESS: CPU fallback initialization successful")
                 except Exception as retry_error:
-                    logger.error(f"CPU fallback also failed: {retry_error}")
+                    logger.error(f"[WITTICISM] RECOVERY_FAILED: CPU fallback also failed - {retry_error}")
                     QMessageBox.critical(None, "Initialization Error",
                                        f"Failed to initialize even with CPU fallback:\n{str(retry_error)}")
                     sys.exit(1)
@@ -274,14 +297,15 @@ class WitticismApp:
         # Show initial notification
         if self.config_manager.get("ui.show_notifications", True):
             from PyQt5.QtWidgets import QSystemTrayIcon
+            ptt_key = self.config_manager.get("hotkeys.push_to_talk", "F9").upper()
             self.tray_app.showMessage(
                 "Witticism",
-                "Voice transcription ready. Hold F9 to record (or switch to Toggle mode).",
+                f"Voice transcription ready. Hold {ptt_key} to record (or switch to Toggle mode).",
                 QSystemTrayIcon.Information,
                 3000
             )
 
-        logger.info("Witticism started successfully")
+        logger.info("[WITTICISM] STARTUP_COMPLETE: application ready and running")
 
         # Run application
         sys.exit(app.exec_())

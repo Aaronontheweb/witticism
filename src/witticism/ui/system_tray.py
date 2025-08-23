@@ -719,6 +719,16 @@ class SystemTrayApp(QSystemTrayIcon):
             if not self.cuda_error_shown:
                 QTimer.singleShot(1000, self.show_cuda_error_notification)
                 self.cuda_error_shown = True
+        # Also check if startup CUDA was fixed (successful recovery but should still notify)
+        elif engine and hasattr(engine, 'startup_cuda_fixed') and engine.startup_cuda_fixed:
+            if not self.cuda_error_shown:
+                QTimer.singleShot(1000, lambda: self.show_notification(
+                    "GPU Recovery Successful",
+                    "GPU context was corrupted at startup but has been restored.\n"
+                    "Transcription will use GPU acceleration.",
+                    duration=8000
+                ))
+                # Don't set cuda_error_shown since this is a success notification
 
         self.audio_capture = audio_capture
         self.hotkey_manager = hotkey_manager
