@@ -119,7 +119,7 @@ if pipx list | grep -q "package witticism"; then
     echo "✓ Witticism is already installed"
     
     # Get current version
-    CURRENT_VERSION=$(pipx list | grep -A1 "package witticism" | grep "version" | sed 's/.*version \([^,]*\).*/\1/')
+    CURRENT_VERSION=$(pipx list | grep "package witticism" | sed 's/.*package witticism \([^,]*\).*/\1/')
     echo "  Current version: $CURRENT_VERSION"
     
     # Check PyTorch version in the pipx environment
