@@ -92,7 +92,77 @@ class WhisperXEngine:
         self.resume_validation_attempts = 0
         self.suspend_resume_callback = None  # Callback for suspend/resume events
 
+        # Startup CUDA health tracking
+        self.startup_cuda_fixed = False
+
         logger.info(f"WhisperX Engine initialized: device={self.device}, compute_type={self.compute_type}")
+
+    def validate_and_clean_cuda_at_startup(self) -> bool:
+        """Validate CUDA health at startup and perform nuclear cleanup if corrupted.
+        
+        Returns:
+            bool: True if CUDA is healthy or successfully cleaned, False if should force CPU mode
+        """
+        if self.device != "cuda" or not torch.cuda.is_available():
+            return True  # Not using CUDA, no validation needed
+
+        try:
+            logger.info("Performing startup CUDA health check...")
+            
+            # Test if CUDA context is healthy with minimal operation
+            test_tensor = torch.tensor([1.0], device='cuda')
+            test_result = test_tensor * 2
+            del test_tensor, test_result
+            torch.cuda.empty_cache()
+            
+            logger.info("CUDA context healthy at startup")
+            return True
+            
+        except Exception as e:
+            logger.warning(f"CUDA context corrupted at startup: {e}")
+            logger.warning("Performing EMERGENCY startup CUDA cleanup...")
+            
+            try:
+                # Perform the same nuclear cleanup as suspend handler
+                self._nuclear_cuda_startup_cleanup()
+                
+                # Test again after cleanup
+                test_tensor = torch.tensor([1.0], device='cuda')
+                del test_tensor
+                torch.cuda.empty_cache()
+                
+                logger.info("Startup CUDA cleanup successful - context restored")
+                self.startup_cuda_fixed = True
+                return True
+                
+            except Exception as cleanup_error:
+                logger.error(f"Startup CUDA cleanup failed: {cleanup_error}")
+                logger.warning("Forcing CPU mode due to irrecoverable CUDA corruption")
+                return False
+
+    def _nuclear_cuda_startup_cleanup(self):
+        """Nuclear CUDA cleanup identical to suspend handler but for startup"""
+        try:
+            if torch.cuda.is_available():
+                logger.debug("Performing nuclear CUDA cleanup at startup...")
+                
+                # Force PyTorch to release all CUDA memory allocations
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+                torch.cuda.reset_peak_memory_stats()
+                
+                # Additional aggressive cleanup
+                torch.cuda.ipc_collect()
+                
+                logger.debug("Nuclear CUDA cleanup completed")
+                
+        except Exception as e:
+            logger.warning(f"Nuclear CUDA cleanup error (continuing): {e}")
+        
+        # Force garbage collection multiple times
+        import gc
+        for _ in range(3):
+            gc.collect()
 
     def load_models(self, progress_callback: Optional[Callable[[str, int], None]] = None, timeout: Optional[float] = 300) -> None:
         """Load models with progress tracking and timeout support.
