@@ -426,6 +426,14 @@ class SystemTrayApp(QSystemTrayIcon):
             msg.setStandardButtons(QMessageBox.Ok)
             msg.exec_()
 
+    def show_notification(self, title: str, message: str, icon=None, duration=5000):
+        """Show a general system tray notification."""
+        if icon is None:
+            icon = QSystemTrayIcon.Information
+
+        if self.supportsMessages():
+            self.showMessage(title, message, icon, duration)
+
     def change_model(self, model_name: str):
         # Uncheck all other models
         for action in self.model_actions:

@@ -6,7 +6,6 @@ Hold ENTER to record, release to transcribe.
 
 import sys
 from pathlib import Path
-import numpy as np
 import time
 
 # Add src to path

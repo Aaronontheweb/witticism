@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 # Test the mock WhisperX
 print("Testing mock WhisperX implementation...")
 
-from witticism.core.mock_whisperx import load_model, load_align_model
+from witticism.core.mock_whisperx import load_model
 import numpy as np
 
 # Create mock audio data
