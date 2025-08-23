@@ -108,13 +108,15 @@ class HotkeyManager:
                     # Push-to-talk mode - stop recording on release
                     if self.ptt_active:
                         self.ptt_active = False
-                        logger.debug("PTT key released")
+                        ptt_key_name = getattr(self.ptt_key, 'name', str(self.ptt_key))
+                        logger.debug(f"[HOTKEY_MANAGER] PTT_STOP: {ptt_key_name} released - recording stopped")
                         if self.on_push_to_talk_stop:
                             self.on_push_to_talk_stop()
                 elif self.mode == "toggle":
                     # Toggle mode - toggle dictation state
                     self.dictation_active = not self.dictation_active
-                    logger.debug(f"Toggle dictation: {self.dictation_active}")
+                    ptt_key_name = getattr(self.ptt_key, 'name', str(self.ptt_key))
+                    logger.debug(f"[HOTKEY_MANAGER] TOGGLE_DICTATION: {ptt_key_name} pressed - dictation {'enabled' if self.dictation_active else 'disabled'}")
                     if self.on_toggle_dictation:
                         self.on_toggle_dictation(self.dictation_active)
 
@@ -143,8 +145,10 @@ class HotkeyManager:
         return True
 
     def change_ptt_key(self, key):
+        old_key_name = getattr(self.ptt_key, 'name', str(self.ptt_key))
+        new_key_name = getattr(key, 'name', str(key))
         self.ptt_key = key
-        logger.info(f"PTT key changed to: {key}")
+        logger.info(f"[HOTKEY_MANAGER] PTT_KEY_CHANGED: from {old_key_name} to {new_key_name}")
 
     def update_hotkey_from_string(self, key_string: str, hotkey_type: str = "ptt"):
         """Update hotkey from a Qt-style key string (e.g., 'F9', 'Ctrl+Alt+M')"""
@@ -178,12 +182,14 @@ class HotkeyManager:
 
         # If switching from toggle mode while dictation is active, stop it
         if self.mode == "toggle" and mode == "push_to_talk" and self.dictation_active:
+            logger.info("[HOTKEY_MANAGER] DICTATION_STOP: switching from toggle to push-to-talk mode")
             self.dictation_active = False
             if self.on_toggle_dictation:
                 self.on_toggle_dictation(False)
 
+        old_mode = self.mode
         self.mode = mode
-        logger.info(f"Hotkey mode changed to: {mode}")
+        logger.info(f"[HOTKEY_MANAGER] MODE_CHANGED: from {old_mode} to {mode}")
 
 
 class GlobalHotkeyManager(HotkeyManager):
@@ -194,7 +200,7 @@ class GlobalHotkeyManager(HotkeyManager):
     def register_global_hotkey(self, hotkey_str: str, callback: Callable):
         # Parse hotkey string like "<ctrl>+<alt>+m"
         self.global_hotkeys[hotkey_str] = callback
-        logger.info(f"Registered global hotkey: {hotkey_str}")
+        logger.info(f"[HOTKEY_MANAGER] GLOBAL_HOTKEY_REGISTERED: {hotkey_str}")
 
     def start(self):
         if self.global_hotkeys:
