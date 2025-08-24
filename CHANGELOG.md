@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2025-08-24
+
+### 🎯 Major Release: Observability & Recovery
+
+This release focuses on enhanced user notifications, comprehensive diagnostics, and improved system reliability. The v0.5.0 "Observability & Recovery" milestone brings unprecedented visibility into system performance and health.
+
+### ✨ New Features
+
+#### CUDA Health Diagnostics
+- **CUDA Health Check API** - New comprehensive diagnostic interface accessible via system tray "Test CUDA" menu item
+- Real-time GPU device detection with detailed hardware information display
+- Comprehensive CUDA context validation with actionable recommendations
+- Background health checking that doesn't block UI operations
+
+#### Enhanced Visual Feedback
+- **Dynamic status indicators** showing actual GPU device names (e.g., "Running on NVIDIA GTX 1080")
+- **Enhanced tooltips** with clear fallback mode indication and performance context
+- **Visual compute mode feedback** distinguishing between CUDA acceleration and CPU fallback
+- Improved tray icon system with contextual status colors
+
+#### System Diagnostics & Recovery
+- **Diagnostics mode** with `--diagnostics` flag for comprehensive system health reporting
+- **System status dashboard** providing centralized view of application health
+- **Progressive error recovery** with guided user assistance for common issues
+- **Manual CUDA recovery** option directly accessible from system tray
+
+#### Configuration & Usability
+- **Dynamic hotkey updates** - Change hotkeys without application restart
+- **Structured state change logging** for improved debugging and issue resolution
+- Enhanced initialization flow with better error handling and user feedback
+
+### 🔧 Fixed
+- **Hotkey configuration binding** - Resolved F9/F12 configuration inconsistency where config showed F12 but F9 actually worked
+- **Startup CPU fallback notification** - Users now receive clear notification when CUDA is unavailable at startup
+- **Critical initialization ordering** - Fixed dependency resolution and component initialization sequence
+- **CUDA startup fallback** notification timing improved for better user awareness
+
+### 🚀 Improved
+- **Observability**: Complete visibility into GPU/CPU operation modes and system health
+- **User Experience**: Clear visual feedback about performance modes and system status  
+- **Reliability**: Enhanced error recovery with progressive guidance for users
+- **Diagnostics**: Comprehensive health checking and system status reporting
+- **Configuration**: Live configuration updates without restart requirements
+
+### 📊 Technical Details
+- Added comprehensive CUDA validation infrastructure leveraging existing dependency validator
+- Implemented threaded health checks to maintain UI responsiveness
+- Enhanced tooltip system with dynamic device information display
+- Integrated system tray diagnostics with existing validation components
+- All features built upon existing infrastructure for maximum reliability
+
+This release completes the foundational observability and recovery systems that make Witticism more transparent, reliable, and user-friendly. Users now have complete visibility into their system's performance characteristics and immediate access to diagnostic tools.
+
 ## [0.4.6] - 2025-08-23
 
 ### Fixed
