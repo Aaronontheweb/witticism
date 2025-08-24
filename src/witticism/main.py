@@ -122,6 +122,38 @@ class WitticismApp:
 
     def initialize_components(self):
         try:
+            # CRITICAL: Validate dependencies FIRST to catch missing requirements early
+            logger.info("[WITTICISM] DEPENDENCY_CHECK: validating system and Python dependencies")
+            from witticism.core.dependency_validator import DependencyValidator
+            validator = DependencyValidator()
+            dependency_results = validator.validate_all()
+
+            # Check for fatal dependency issues
+            if validator.has_fatal_issues(dependency_results):
+                missing_required = validator.get_missing_required(dependency_results)
+                error_msg = f"Missing required dependencies: {', '.join(dep.name for dep in missing_required)}"
+                logger.error(f"[WITTICISM] DEPENDENCY_FATAL: {error_msg}")
+                # Print detailed report for user
+                validator.print_report(dependency_results)
+                raise RuntimeError(f"Cannot start due to missing dependencies: {error_msg}")
+
+            # Log warnings for missing optional dependencies
+            missing_optional = validator.get_missing_optional(dependency_results)
+            if missing_optional:
+                logger.warning(f"[WITTICISM] DEPENDENCY_OPTIONAL_MISSING: {len(missing_optional)} optional features will be disabled")
+                for dep in missing_optional:
+                    logger.info(f"[WITTICISM] FEATURE_DISABLED: {dep.name} - {dep.error_message}")
+
+            # CRITICAL: Create system tray EARLY for startup notifications
+            # This must happen before any risky operations so users can see error messages
+            logger.info("[WITTICISM] TRAY_EARLY_INIT: creating system tray for startup notifications")
+            from witticism.ui.system_tray import SystemTrayApp
+            self.tray_app = SystemTrayApp()
+            # Set basic configuration access for early notifications
+            if self.config_manager:
+                self.tray_app.config_manager = self.config_manager
+            logger.info("[WITTICISM] TRAY_EARLY_READY: system tray available for startup error notifications")
+
             # Initialize WhisperX engine
             model_size = self.args.model or self.config_manager.get("model.size", "base")
             device = self.config_manager.get("model.device")
@@ -136,9 +168,19 @@ class WitticismApp:
                 language=self.config_manager.get("model.language", "en")
             )
 
-            # Perform startup CUDA health check and cleanup if needed
+            # CRITICAL: Enable sleep monitoring BEFORE any CUDA operations or model loading
+            # This ensures CUDA protection is active during startup CUDA validation
+            try:
+                logger.info("[WITTICISM] SLEEP_MONITORING: enabling proactive suspend/resume detection")
+                self.engine.enable_sleep_monitoring()
+                logger.info("[WITTICISM] SLEEP_MONITORING_ACTIVE: CUDA protection enabled for initialization")
+            except Exception as e:
+                logger.warning(f"[WITTICISM] SLEEP_MONITORING_FAILED: initialization failed - {e}")
+                # Not a fatal error - continue without sleep monitoring protection
+
+            # Perform startup CUDA health check and cleanup (now with sleep monitoring protection)
             if self.engine.device == "cuda":
-                logger.info("[WITTICISM] CUDA_VALIDATION: performing startup health check")
+                logger.info("[WITTICISM] CUDA_VALIDATION: performing startup health check with sleep monitor protection")
                 cuda_healthy = self.engine.validate_and_clean_cuda_at_startup()
                 if not cuda_healthy:
                     logger.warning(f"[WITTICISM] STARTUP_CUDA_FALLBACK: CUDA unhealthy, switching from {self.engine.device} to CPU")
@@ -155,18 +197,10 @@ class WitticismApp:
             else:
                 logger.info(f"[WITTICISM] NON_CUDA_DEVICE: using {self.engine.device}, skipping CUDA validation")
 
-            # Load models
+            # Load models (now with sleep monitoring protection)
             logger.info("[WITTICISM] MODEL_LOADING: starting WhisperX model loading")
             self.engine.load_models()
             logger.info("[WITTICISM] MODEL_LOADING_COMPLETE: all models loaded successfully")
-
-            # Enable sleep monitoring for proactive CUDA recovery
-            try:
-                logger.info("[WITTICISM] SLEEP_MONITORING: enabling proactive suspend/resume detection")
-                self.engine.enable_sleep_monitoring()
-            except Exception as e:
-                logger.warning(f"[WITTICISM] SLEEP_MONITORING_FAILED: initialization failed - {e}")
-                # Not a fatal error - continue without sleep monitoring
 
             # Initialize audio capture
             sample_rate = self.config_manager.get("audio.sample_rate", 16000)
@@ -264,30 +298,70 @@ class WitticismApp:
             error_msg = str(e)
             logger.error(f"[WITTICISM] INITIALIZATION_FAILED: {error_msg}")
 
+            # Use early system tray for error notifications if available
+            error_title = "Witticism Startup Error"
+
             # Check if this is a CUDA-related error that we can recover from
             if ("CUDA" in error_msg or "cuda" in error_msg or
                 "GPU" in error_msg or "torch" in error_msg):
                 logger.warning(f"[WITTICISM] CUDA_INIT_FAILURE: CUDA-related error detected - {error_msg[:100]}...")
                 logger.info("[WITTICISM] RECOVERY_ATTEMPT: attempting CPU fallback recovery")
 
+                # Show recovery notification via tray if available
+                if self.tray_app:
+                    from PyQt5.QtWidgets import QSystemTrayIcon
+                    self.tray_app.showMessage(
+                        error_title,
+                        "GPU initialization failed. Attempting CPU fallback...",
+                        QSystemTrayIcon.Warning,
+                        3000
+                    )
+
                 try:
                     # Force CPU mode and retry initialization
                     self._force_cpu_mode_and_retry()
                     logger.info("[WITTICISM] RECOVERY_SUCCESS: CPU fallback initialization successful")
+
+                    # Show success notification
+                    if self.tray_app:
+                        self.tray_app.showMessage(
+                            "Witticism Recovery",
+                            "Successfully recovered using CPU mode. GPU functionality disabled.",
+                            QSystemTrayIcon.Information,
+                            5000
+                        )
+
                 except Exception as retry_error:
                     logger.error(f"[WITTICISM] RECOVERY_FAILED: CPU fallback also failed - {retry_error}")
+
+                    # Show failure notification via tray if available
+                    if self.tray_app:
+                        self.tray_app.showMessage(
+                            error_title,
+                            "Startup failed even with CPU fallback. Check logs for details.",
+                            QSystemTrayIcon.Critical,
+                            8000
+                        )
+
                     QMessageBox.critical(None, "Initialization Error",
                                        f"Failed to initialize even with CPU fallback:\n{str(retry_error)}")
                     sys.exit(1)
             else:
                 # Non-CUDA errors are still fatal
+                # Show error notification via tray if available
+                if self.tray_app:
+                    self.tray_app.showMessage(
+                        error_title,
+                        f"Critical startup error: {error_msg[:100]}{'...' if len(error_msg) > 100 else ''}",
+                        QSystemTrayIcon.Critical,
+                        8000
+                    )
+
                 QMessageBox.critical(None, "Initialization Error", f"Failed to initialize: {error_msg}")
                 sys.exit(1)
 
-        # Create system tray app
-        self.tray_app = SystemTrayApp()
-
-        # Setup connections
+        # System tray already created early during initialization
+        # Setup connections with all components
         self.setup_connections()
 
         # Handle signals
