@@ -301,7 +301,7 @@ class SystemTrayApp(QSystemTrayIcon):
     def set_status(self, status: str):
         # Build enhanced tooltip with device information
         tooltip_parts = ["Witticism"]
-        
+
         # Get device information for enhanced tooltips
         device_info = None
         if self.engine and hasattr(self.engine, 'get_device_info'):
@@ -309,15 +309,15 @@ class SystemTrayApp(QSystemTrayIcon):
                 device_info = self.engine.get_device_info()
             except Exception:
                 device_info = None
-        
+
         # Check if we're in CUDA fallback mode
         if self.engine and hasattr(self.engine, 'cuda_fallback') and self.engine.cuda_fallback:
             if "Ready" in status:
                 status = "Ready (CPU Mode - CUDA Error)"
-            
+
             # Enhanced tooltip for CPU fallback mode
             if device_info and 'gpu_name' in device_info:
-                tooltip_parts.append(f"Running on CPU (fallback mode)")
+                tooltip_parts.append("Running on CPU (fallback mode)")
                 tooltip_parts.append(f"GPU: {device_info['gpu_name']} (unavailable)")
                 tooltip_parts.append("Restart for GPU acceleration")
             else:
@@ -333,11 +333,11 @@ class SystemTrayApp(QSystemTrayIcon):
                     tooltip_parts.append("Running on CPU")
                 else:
                     tooltip_parts.append(f"Running on {current_device}")
-            
+
         # Add status to tooltip
         if status != "Ready":
             tooltip_parts.append(f"Status: {status}")
-        
+
         self.setToolTip(" - ".join(tooltip_parts))
         self.status_action.setText(f"Status: {status}")
 

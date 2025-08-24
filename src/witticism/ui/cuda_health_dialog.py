@@ -179,7 +179,7 @@ class CudaHealthDialog(QDialog):
             if cuda_dep.available:
                 output_lines.append(f"✅ CUDA Available: Yes (v{cuda_dep.version})")
             else:
-                output_lines.append(f"❌ CUDA Available: No")
+                output_lines.append("❌ CUDA Available: No")
                 if cuda_dep.error_message:
                     output_lines.append(f"   Error: {cuda_dep.error_message}")
         else:
