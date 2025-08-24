@@ -127,7 +127,7 @@ class WitticismApp:
             from witticism.core.dependency_validator import DependencyValidator
             validator = DependencyValidator()
             dependency_results = validator.validate_all()
-            
+
             # Check for fatal dependency issues
             if validator.has_fatal_issues(dependency_results):
                 missing_required = validator.get_missing_required(dependency_results)
@@ -136,7 +136,7 @@ class WitticismApp:
                 # Print detailed report for user
                 validator.print_report(dependency_results)
                 raise RuntimeError(f"Cannot start due to missing dependencies: {error_msg}")
-            
+
             # Log warnings for missing optional dependencies
             missing_optional = validator.get_missing_optional(dependency_results)
             if missing_optional:
@@ -300,7 +300,7 @@ class WitticismApp:
 
             # Use early system tray for error notifications if available
             error_title = "Witticism Startup Error"
-            
+
             # Check if this is a CUDA-related error that we can recover from
             if ("CUDA" in error_msg or "cuda" in error_msg or
                 "GPU" in error_msg or "torch" in error_msg):
@@ -321,7 +321,7 @@ class WitticismApp:
                     # Force CPU mode and retry initialization
                     self._force_cpu_mode_and_retry()
                     logger.info("[WITTICISM] RECOVERY_SUCCESS: CPU fallback initialization successful")
-                    
+
                     # Show success notification
                     if self.tray_app:
                         self.tray_app.showMessage(
@@ -330,19 +330,19 @@ class WitticismApp:
                             QSystemTrayIcon.Information,
                             5000
                         )
-                        
+
                 except Exception as retry_error:
                     logger.error(f"[WITTICISM] RECOVERY_FAILED: CPU fallback also failed - {retry_error}")
-                    
+
                     # Show failure notification via tray if available
                     if self.tray_app:
                         self.tray_app.showMessage(
                             error_title,
-                            f"Startup failed even with CPU fallback. Check logs for details.",
+                            "Startup failed even with CPU fallback. Check logs for details.",
                             QSystemTrayIcon.Critical,
                             8000
                         )
-                    
+
                     QMessageBox.critical(None, "Initialization Error",
                                        f"Failed to initialize even with CPU fallback:\n{str(retry_error)}")
                     sys.exit(1)
@@ -356,7 +356,7 @@ class WitticismApp:
                         QSystemTrayIcon.Critical,
                         8000
                     )
-                    
+
                 QMessageBox.critical(None, "Initialization Error", f"Failed to initialize: {error_msg}")
                 sys.exit(1)
 
