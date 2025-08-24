@@ -7,6 +7,7 @@ from typing import Optional
 from witticism.core.continuous_transcriber import ContinuousTranscriber
 from witticism.ui.about_dialog import AboutDialog
 from witticism.ui.settings_dialog import SettingsDialog
+from witticism.ui.cuda_health_dialog import CudaHealthDialog
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,7 @@ class SystemTrayApp(QSystemTrayIcon):
         self.hotkey_manager = None
         self.output_manager = None
         self.config_manager = None
+        self.dependency_validator = None  # For CUDA health checks
 
         self.is_recording = False
         self.is_enabled = True
@@ -107,6 +109,13 @@ class SystemTrayApp(QSystemTrayIcon):
         # Device selection submenu
         self.device_menu = self.menu.addMenu("Audio Device")
         self.update_device_menu()
+
+        self.menu.addSeparator()
+
+        # CUDA Health Check action
+        self.cuda_health_action = QAction("Test CUDA", self)
+        self.cuda_health_action.triggered.connect(self.show_cuda_health)
+        self.menu.addAction(self.cuda_health_action)
 
         self.menu.addSeparator()
 
@@ -290,16 +299,46 @@ class SystemTrayApp(QSystemTrayIcon):
             action.setChecked(action.data() == current_model)
 
     def set_status(self, status: str):
+        # Build enhanced tooltip with device information
+        tooltip_parts = ["Witticism"]
+        
+        # Get device information for enhanced tooltips
+        device_info = None
+        if self.engine and hasattr(self.engine, 'get_device_info'):
+            try:
+                device_info = self.engine.get_device_info()
+            except Exception:
+                device_info = None
+        
         # Check if we're in CUDA fallback mode
         if self.engine and hasattr(self.engine, 'cuda_fallback') and self.engine.cuda_fallback:
             if "Ready" in status:
                 status = "Ready (CPU Mode - CUDA Error)"
-                self.setToolTip("Witticism (CPU Mode - Restart for GPU)")
+            
+            # Enhanced tooltip for CPU fallback mode
+            if device_info and 'gpu_name' in device_info:
+                tooltip_parts.append(f"Running on CPU (fallback mode)")
+                tooltip_parts.append(f"GPU: {device_info['gpu_name']} (unavailable)")
+                tooltip_parts.append("Restart for GPU acceleration")
             else:
-                self.setToolTip(f"Witticism - {status} (CPU Mode)")
+                tooltip_parts.append("Running on CPU (fallback mode)")
+                tooltip_parts.append("Restart for GPU acceleration")
         else:
-            self.setToolTip(f"Witticism - {status}")
-
+            # Enhanced tooltip for normal operation
+            if device_info:
+                current_device = device_info.get('device', 'unknown')
+                if current_device == 'cuda' and 'gpu_name' in device_info:
+                    tooltip_parts.append(f"Running on {device_info['gpu_name']}")
+                elif current_device == 'cpu':
+                    tooltip_parts.append("Running on CPU")
+                else:
+                    tooltip_parts.append(f"Running on {current_device}")
+            
+        # Add status to tooltip
+        if status != "Ready":
+            tooltip_parts.append(f"Status: {status}")
+        
+        self.setToolTip(" - ".join(tooltip_parts))
         self.status_action.setText(f"Status: {status}")
 
         # Update icon color based on status and CUDA fallback
@@ -314,19 +353,35 @@ class SystemTrayApp(QSystemTrayIcon):
             else:
                 self.update_icon_color("orange")
         else:
-            # Normal colors
-            if "Ready" in status:
-                self.update_icon_color("green")
-            elif "Recording" in status:
-                self.update_icon_color("red")
-            elif "Dictating" in status:
-                self.update_icon_color("red")  # Red for active dictation
-            elif "Transcribing" in status:
-                self.update_icon_color("yellow")
-            elif "Disabled" in status:
-                self.update_icon_color("gray")
+            # Normal colors - Green for CUDA, different shades for CPU
+            if device_info and device_info.get('device') == 'cuda':
+                # CUDA mode - use green as primary color
+                if "Ready" in status:
+                    self.update_icon_color("green")
+                elif "Recording" in status:
+                    self.update_icon_color("red")
+                elif "Dictating" in status:
+                    self.update_icon_color("red")  # Red for active dictation
+                elif "Transcribing" in status:
+                    self.update_icon_color("yellow")
+                elif "Disabled" in status:
+                    self.update_icon_color("gray")
+                else:
+                    self.update_icon_color("green")
             else:
-                self.update_icon_color("green")
+                # CPU mode (intentional) - use slightly different color scheme
+                if "Ready" in status:
+                    self.update_icon_color("green")  # Still green, but we know it's CPU from tooltip
+                elif "Recording" in status:
+                    self.update_icon_color("red")
+                elif "Dictating" in status:
+                    self.update_icon_color("red")
+                elif "Transcribing" in status:
+                    self.update_icon_color("yellow")
+                elif "Disabled" in status:
+                    self.update_icon_color("gray")
+                else:
+                    self.update_icon_color("green")
 
     def toggle_enabled(self):
         self.is_enabled = not self.is_enabled
@@ -678,6 +733,15 @@ class SystemTrayApp(QSystemTrayIcon):
                 2000
             )
 
+    def show_cuda_health(self):
+        """Show the CUDA health check dialog"""
+        dialog = CudaHealthDialog(
+            engine=self.engine,
+            dependency_validator=self.dependency_validator,
+            parent=None
+        )
+        dialog.exec_()
+
     def show_about(self):
         """Show the about dialog"""
         dialog = AboutDialog(config_manager=self.config_manager)
@@ -706,8 +770,9 @@ class SystemTrayApp(QSystemTrayIcon):
 
         QApplication.quit()
 
-    def set_components(self, engine, audio_capture, hotkey_manager, output_manager, config_manager):
+    def set_components(self, engine, audio_capture, hotkey_manager, output_manager, config_manager, dependency_validator=None):
         self.engine = engine
+        self.dependency_validator = dependency_validator
 
         # Check if engine is in CUDA fallback mode on startup
         if engine and hasattr(engine, 'cuda_fallback') and engine.cuda_fallback:
