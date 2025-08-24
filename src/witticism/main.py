@@ -125,20 +125,20 @@ class WitticismApp:
             # CRITICAL: Validate dependencies FIRST to catch missing requirements early
             logger.info("[WITTICISM] DEPENDENCY_CHECK: validating system and Python dependencies")
             from witticism.core.dependency_validator import DependencyValidator
-            validator = DependencyValidator()
-            dependency_results = validator.validate_all()
+            self.dependency_validator = DependencyValidator()
+            dependency_results = self.dependency_validator.validate_all()
 
             # Check for fatal dependency issues
-            if validator.has_fatal_issues(dependency_results):
-                missing_required = validator.get_missing_required(dependency_results)
+            if self.dependency_validator.has_fatal_issues(dependency_results):
+                missing_required = self.dependency_validator.get_missing_required(dependency_results)
                 error_msg = f"Missing required dependencies: {', '.join(dep.name for dep in missing_required)}"
                 logger.error(f"[WITTICISM] DEPENDENCY_FATAL: {error_msg}")
                 # Print detailed report for user
-                validator.print_report(dependency_results)
+                self.dependency_validator.print_report(dependency_results)
                 raise RuntimeError(f"Cannot start due to missing dependencies: {error_msg}")
 
             # Log warnings for missing optional dependencies
-            missing_optional = validator.get_missing_optional(dependency_results)
+            missing_optional = self.dependency_validator.get_missing_optional(dependency_results)
             if missing_optional:
                 logger.warning(f"[WITTICISM] DEPENDENCY_OPTIONAL_MISSING: {len(missing_optional)} optional features will be disabled")
                 for dep in missing_optional:
@@ -255,7 +255,8 @@ class WitticismApp:
             self.audio_capture,
             self.hotkey_manager,
             self.output_manager,
-            self.config_manager
+            self.config_manager,
+            self.dependency_validator
         )
 
         # Start hotkey manager
