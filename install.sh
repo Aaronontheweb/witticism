@@ -180,6 +180,41 @@ if nvidia-smi &> /dev/null; then
                     fi
                     
                     echo "✓ NVIDIA suspend/resume protection configured"
+                    
+                    # Install systemd sleep hook for nvidia_uvm module reload
+                    SLEEP_HOOK_FILE="/usr/lib/systemd/system-sleep/99-nvidia-witticism"
+                    
+                    if [ ! -f "$SLEEP_HOOK_FILE" ]; then
+                        echo "  Installing systemd sleep hook for module reload..."
+                        
+                        # Create the sleep hook script
+                        cat << 'SLEEPHOOK' | sudo tee "$SLEEP_HOOK_FILE" > /dev/null
+#!/bin/bash
+# Auto-reload nvidia_uvm module after suspend/resume to fix CUDA
+# Created by Witticism installer
+
+case "$1" in
+    post)
+        # After resume - reload nvidia_uvm module
+        # Wait for system to stabilize
+        sleep 2
+        
+        # Only reload if nvidia module is loaded
+        if lsmod | grep -q "^nvidia " && lsmod | grep -q nvidia_uvm; then
+            # Try to reload nvidia_uvm
+            rmmod nvidia_uvm 2>/dev/null && modprobe nvidia_uvm 2>/dev/null
+        fi
+        ;;
+esac
+SLEEPHOOK
+                    
+                        # Make it executable
+                        sudo chmod +x "$SLEEP_HOOK_FILE" 2>/dev/null || true
+                        echo "✓ Systemd sleep hook installed"
+                    else
+                        echo "✓ Systemd sleep hook already installed"
+                    fi
+                    
                     echo "  Note: A reboot may be required for full protection"
                 fi
             fi
