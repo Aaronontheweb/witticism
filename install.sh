@@ -102,6 +102,94 @@ if nvidia-smi &> /dev/null; then
     else
         INDEX_URL="https://download.pytorch.org/whl/cpu"
     fi
+    
+    # Configure NVIDIA for suspend/resume compatibility (idempotent)
+    echo "🔧 Checking NVIDIA suspend/resume configuration..."
+    NVIDIA_CONFIG_FILE="/etc/modprobe.d/nvidia-power-management.conf"
+    NEEDS_NVIDIA_CONFIG=false
+    CONFIG_CHANGED=false
+    
+    # Check if configuration exists and is correct
+    if [ -f "$NVIDIA_CONFIG_FILE" ]; then
+        # Check if our specific options are already configured
+        if grep -q "NVreg_PreserveVideoMemoryAllocations=1" "$NVIDIA_CONFIG_FILE" 2>/dev/null && \
+           grep -q "NVreg_TemporaryFilePath=" "$NVIDIA_CONFIG_FILE" 2>/dev/null; then
+            echo "✓ NVIDIA suspend/resume protection already configured"
+        else
+            echo "  Existing NVIDIA config found but missing suspend/resume options"
+            NEEDS_NVIDIA_CONFIG=true
+        fi
+    else
+        echo "  No NVIDIA suspend/resume configuration found"
+        NEEDS_NVIDIA_CONFIG=true
+    fi
+    
+    if [ "$NEEDS_NVIDIA_CONFIG" = true ]; then
+        echo "  This prevents CUDA crashes after suspend/resume"
+        echo "  Installing NVIDIA configuration (requires sudo)..."
+        
+        # Create or update the configuration file
+        if command -v sudo &> /dev/null; then
+            # First, backup existing file if present
+            if [ -f "$NVIDIA_CONFIG_FILE" ]; then
+                sudo cp "$NVIDIA_CONFIG_FILE" "${NVIDIA_CONFIG_FILE}.bak.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
+            fi
+            
+            # Check if options already exist and update/append as needed
+            TEMP_CONFIG=$(mktemp)
+            
+            # If file exists, start with existing content
+            if [ -f "$NVIDIA_CONFIG_FILE" ]; then
+                sudo cat "$NVIDIA_CONFIG_FILE" > "$TEMP_CONFIG"
+            fi
+            
+            # Add our options if not present
+            if ! grep -q "NVreg_PreserveVideoMemoryAllocations" "$TEMP_CONFIG" 2>/dev/null; then
+                echo "options nvidia NVreg_PreserveVideoMemoryAllocations=1" >> "$TEMP_CONFIG"
+                CONFIG_CHANGED=true
+            fi
+            
+            if ! grep -q "NVreg_TemporaryFilePath" "$TEMP_CONFIG" 2>/dev/null; then
+                echo "options nvidia NVreg_TemporaryFilePath=/tmp" >> "$TEMP_CONFIG"
+                CONFIG_CHANGED=true
+            fi
+            
+            # Only update if changes were made
+            if [ "$CONFIG_CHANGED" = true ]; then
+                sudo cp "$TEMP_CONFIG" "$NVIDIA_CONFIG_FILE" || {
+                    echo "⚠️  Failed to configure NVIDIA suspend/resume protection"
+                    echo "   You may experience CUDA errors after suspend/resume"
+                    echo "   To fix manually, run:"
+                    echo "   echo 'options nvidia NVreg_PreserveVideoMemoryAllocations=1' | sudo tee -a $NVIDIA_CONFIG_FILE"
+                    echo "   echo 'options nvidia NVreg_TemporaryFilePath=/tmp' | sudo tee -a $NVIDIA_CONFIG_FILE"
+                    echo "   sudo update-initramfs -u"
+                }
+                
+                # Update initramfs if configuration was successful
+                if [ -f "$NVIDIA_CONFIG_FILE" ] && grep -q "NVreg_PreserveVideoMemoryAllocations" "$NVIDIA_CONFIG_FILE"; then
+                    echo "  Updating initramfs (this may take a moment)..."
+                    sudo update-initramfs -u 2>/dev/null || {
+                        echo "⚠️  Could not update initramfs - changes will apply after next reboot"
+                    }
+                    
+                    # Enable NVIDIA suspend/resume services if they exist
+                    if systemctl list-unit-files | grep -q nvidia-suspend.service 2>/dev/null; then
+                        sudo systemctl enable nvidia-suspend.service 2>/dev/null || true
+                        sudo systemctl enable nvidia-resume.service 2>/dev/null || true
+                        echo "✓ NVIDIA suspend/resume services enabled"
+                    fi
+                    
+                    echo "✓ NVIDIA suspend/resume protection configured"
+                    echo "  Note: A reboot may be required for full protection"
+                fi
+            fi
+            
+            rm -f "$TEMP_CONFIG"
+        else
+            echo "⚠️  sudo not available - cannot configure NVIDIA suspend/resume protection"
+            echo "   You may experience CUDA errors after suspend/resume"
+        fi
+    fi
 else
     echo "💻 No GPU detected - using CPU version"
     INDEX_URL="https://download.pytorch.org/whl/cpu"
