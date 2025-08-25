@@ -193,6 +193,32 @@ python -c "import torch; print(torch.cuda.is_available())"
 ```
 Should return `True` if CUDA is available.
 
+### CUDA errors after suspend/resume
+If you experience CUDA crashes after suspending and resuming your system, the installer (v0.6.0+) automatically configures NVIDIA to preserve GPU memory across suspend cycles. If you installed Witticism before this fix was added, you can either:
+
+1. **Re-run the installer** (recommended):
+   ```bash
+   curl -sSL https://raw.githubusercontent.com/aaronstannard/witticism/main/install.sh | bash
+   ```
+   The installer is idempotent and will apply the fix without reinstalling Witticism.
+
+2. **Apply the fix manually**:
+   ```bash
+   # Configure NVIDIA to preserve memory across suspend
+   echo "options nvidia NVreg_PreserveVideoMemoryAllocations=1" | sudo tee /etc/modprobe.d/nvidia-power-management.conf
+   echo "options nvidia NVreg_TemporaryFilePath=/tmp" | sudo tee -a /etc/modprobe.d/nvidia-power-management.conf
+   sudo update-initramfs -u
+   
+   # Enable NVIDIA suspend services (if available)
+   sudo systemctl enable nvidia-suspend.service
+   sudo systemctl enable nvidia-resume.service
+   
+   # Reboot for changes to take effect
+   sudo reboot
+   ```
+
+This fix prevents the `nvidia_uvm` kernel module from becoming corrupted during suspend/resume cycles, which is the root cause of "CUDA unspecified launch failure" errors.
+
 ### Models not loading
 First run downloads models (~150MB for base). Ensure stable internet connection.
 

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 🔧 Fixes
+
+#### NVIDIA Suspend/Resume Fix
+- **Root cause identified and fixed** - CUDA crashes after suspend/resume were caused by nvidia_uvm kernel module corruption
+- **Automatic system configuration** - Installer now configures NVIDIA to preserve GPU memory across suspend cycles
+- **Idempotent installation** - Configuration is checked and only applied if needed, safe for re-runs and upgrades
+- Fixes months of SIGABRT crashes that occurred after system suspend/resume cycles
+- Solution based on research from PyTorch forums and Ask Ubuntu community
+
 ## [0.5.0] - 2025-08-24
 
 ### 🎯 Major Release: Observability & Recovery
