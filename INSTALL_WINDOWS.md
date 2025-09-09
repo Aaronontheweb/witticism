@@ -34,10 +34,13 @@ No manual Python version management required!
 - Provides detailed error messages and troubleshooting
 
 ### Windows Integration
-- Creates desktop shortcut for easy launching
-- Sets up silent auto-start via startup folder
-- Uses VBS script to launch without console window
-- Integrates with Windows system tray
+- **Desktop shortcut**: Creates shortcut with proper Witticism icon for easy launching
+- **Auto-start**: Sets up silent startup via Windows Startup folder
+  - Creates `WitticismAutoStart.ps1` (PowerShell launcher script)
+  - Creates `WitticismAutoStart.vbs` (VBS wrapper for silent execution)
+  - Runs automatically when Windows user logs in
+  - No console window appears (runs silently in background)
+- **System tray integration**: App runs in system tray with right-click menu
 
 ## Manual Installation
 
@@ -96,18 +99,58 @@ Some antivirus software may block the installation. Try:
 - Add Python and pip to antivirus exclusions
 - Run PowerShell as regular user (not Administrator)
 
-### Manual Cleanup
-To uninstall:
+## Uninstallation
+
+### Complete Uninstall
+
+To completely remove Witticism from Windows:
+
+```powershell
+# 1. Remove auto-start files from startup folder
+$startupFolder = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::Startup)
+Remove-Item (Join-Path $startupFolder "WitticismAutoStart.vbs") -ErrorAction SilentlyContinue
+Remove-Item (Join-Path $startupFolder "WitticismAutoStart.ps1") -ErrorAction SilentlyContinue
+
+# 2. Remove desktop shortcut
+Remove-Item (Join-Path ([System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::Desktop)) "Witticism.lnk") -ErrorAction SilentlyContinue
+
+# 3. Uninstall Witticism package
+python -m pipx uninstall witticism
+
+# 4. Optional: Remove Python 3.12 if it was auto-installed by the installer
+# (Only do this if you don't need Python 3.12 for other applications)
+# python-3.12.10-amd64.exe /uninstall /quiet
+```
+
+### Quick Uninstall (Package Only)
+
+If you just want to remove the Witticism application but keep Python and the shortcuts:
+
+```powershell
+python -m pipx uninstall witticism
+```
+
+### Disable Auto-start Only
+
+To stop Witticism from starting automatically but keep it installed:
 
 ```powershell
 # Remove auto-start files
-Remove-Item "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\WitticismAutoStart.*"
+$startupFolder = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::Startup)
+Remove-Item (Join-Path $startupFolder "WitticismAutoStart.*") -ErrorAction SilentlyContinue
+```
 
-# Remove desktop shortcut  
-Remove-Item "$env:USERPROFILE\Desktop\Witticism.lnk"
+### Verification
 
-# Uninstall with pipx
-python -m pipx uninstall witticism
+After uninstall, verify removal:
+
+```powershell
+# Check if witticism command still exists
+python -m pipx list | findstr witticism
+
+# Check if auto-start files are gone
+$startupFolder = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::Startup)
+Get-ChildItem $startupFolder | Where-Object Name -like "*Witticism*"
 ```
 
 ## Why This Approach?
