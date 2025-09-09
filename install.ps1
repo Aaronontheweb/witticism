@@ -11,27 +11,25 @@ param(
 )
 
 if ($Help) {
-    Write-Host @"
-Witticism Windows Installer
-
-Usage:
-    .\install.ps1                      # Install latest stable version
-    .\install.ps1 -Version "0.6.0b1"   # Install specific version
-    .\install.ps1 -CPUOnly             # Force CPU-only installation  
-    .\install.ps1 -SkipAutoStart       # Don't set up auto-start
-    .\install.ps1 -ForceReinstall      # Force reinstall even if already installed
-    .\install.ps1 -Help                # Show this help
-
-This script automatically:
-- Installs Python 3.12 (compatible version) if needed
-- Sets up isolated Python environment  
-- Installs all dependencies including WhisperX
-- Detects and configures GPU support (CUDA/PyTorch)
-- Sets up auto-start on Windows login
-- Creates desktop shortcuts
-
-No manual Python version management required!
-"@
+    Write-Host "Witticism Windows Installer"
+    Write-Host ""
+    Write-Host "Usage:"
+    Write-Host "    .\install.ps1                      # Install latest stable version"
+    Write-Host "    .\install.ps1 -Version `"0.6.0b1`"   # Install specific version"
+    Write-Host "    .\install.ps1 -CPUOnly             # Force CPU-only installation"
+    Write-Host "    .\install.ps1 -SkipAutoStart       # Don't set up auto-start"
+    Write-Host "    .\install.ps1 -ForceReinstall      # Force reinstall even if already installed"
+    Write-Host "    .\install.ps1 -Help                # Show this help"
+    Write-Host ""
+    Write-Host "This script automatically:"
+    Write-Host "- Installs Python 3.12 (compatible version) if needed"
+    Write-Host "- Sets up isolated Python environment"
+    Write-Host "- Installs all dependencies including WhisperX"
+    Write-Host "- Detects and configures GPU support (CUDA/PyTorch)"
+    Write-Host "- Sets up auto-start on Windows login"
+    Write-Host "- Creates desktop shortcuts"
+    Write-Host ""
+    Write-Host "No manual Python version management required!"
     exit 0
 }
 
@@ -48,7 +46,7 @@ if ($isAdmin) {
 
 # Function to install Python 3.12 automatically
 function Install-Python312 {
-    Write-Host "🐍 Installing Python 3.12 (compatible version for WhisperX)..." -ForegroundColor Blue
+    Write-Host "Installing Python 3.12 (compatible version for WhisperX)..." -ForegroundColor Blue
     
     # Download Python 3.12.10 installer
     $pythonUrl = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
@@ -140,7 +138,7 @@ function Get-Python312Path {
 $python312Path = Get-Python312Path
 
 if (-not $python312Path) {
-    Write-Host "🔍 Python 3.12 not found - installing automatically..." -ForegroundColor Yellow
+    Write-Host "Python 3.12 not found - installing automatically..." -ForegroundColor Yellow
     Write-Host "   (Python 3.12 is required for WhisperX compatibility)" -ForegroundColor Gray
     
     if (-not (Install-Python312)) {
@@ -215,7 +213,7 @@ try {
 function Remove-ExistingWitticism {
     param($pythonPath)
     
-    Write-Host "🧹 Checking for existing Witticism installation..." -ForegroundColor Blue
+    Write-Host "Checking for existing Witticism installation..." -ForegroundColor Blue
     
     try {
         # Check pipx installation
@@ -224,7 +222,7 @@ function Remove-ExistingWitticism {
             Write-Host "   Found pipx installation, removing..." -ForegroundColor Yellow
             & $pythonPath -m pipx uninstall witticism 2>$null
             if ($LASTEXITCODE -eq 0) {
-                Write-Host "   ✓ Removed pipx installation" -ForegroundColor Green
+                Write-Host "   [OK] Removed pipx installation" -ForegroundColor Green
             }
         }
         
@@ -234,11 +232,11 @@ function Remove-ExistingWitticism {
             Write-Host "   Found pip user installation, removing..." -ForegroundColor Yellow
             & $pythonPath -m pip uninstall witticism -y 2>$null
             if ($LASTEXITCODE -eq 0) {
-                Write-Host "   ✓ Removed pip user installation" -ForegroundColor Green
+                Write-Host "   [OK] Removed pip user installation" -ForegroundColor Green
             }
         }
         
-        Write-Host "   ✓ Cleanup complete" -ForegroundColor Green
+        Write-Host "   [OK] Cleanup complete" -ForegroundColor Green
         
     } catch {
         Write-Host "   Warning: Could not fully clean existing installation: $($_.Exception.Message)" -ForegroundColor Yellow
@@ -269,15 +267,15 @@ $pipArgs = @("--pip-args=--index-url $indexUrl --extra-index-url https://pypi.or
 Write-Host "   Installing with Python 3.12 and CPU-optimized PyTorch..." -ForegroundColor Blue
 Write-Host "   (This ensures maximum compatibility with WhisperX)" -ForegroundColor Gray
 Write-Host ""
-Write-Host "📦 DOWNLOADING DEPENDENCIES..." -ForegroundColor Cyan
+Write-Host "DOWNLOADING DEPENDENCIES..." -ForegroundColor Cyan
 Write-Host "   This may take 2-3 minutes - WhisperX includes large AI models" -ForegroundColor Yellow
 Write-Host "   Please be patient while we download:" -ForegroundColor Gray
-Write-Host "   • PyTorch (CPU version, ~100MB)" -ForegroundColor Gray  
-Write-Host "   • WhisperX speech recognition models" -ForegroundColor Gray
-Write-Host "   • Audio processing libraries (librosa, etc.)" -ForegroundColor Gray
-Write-Host "   • ML dependencies (transformers, numpy, scipy)" -ForegroundColor Gray
+Write-Host "   - PyTorch (CPU version, ~100MB)" -ForegroundColor Gray  
+Write-Host "   - WhisperX speech recognition models" -ForegroundColor Gray
+Write-Host "   - Audio processing libraries (librosa, etc.)" -ForegroundColor Gray
+Write-Host "   - ML dependencies (transformers, numpy, scipy)" -ForegroundColor Gray
 Write-Host ""
-Write-Host "⏳ Installing... (this is normal, not frozen)" -ForegroundColor Green
+Write-Host "Installing... (this is normal, not frozen)" -ForegroundColor Green
 
 try {
     # Use our Python 3.12 path explicitly  
@@ -304,9 +302,9 @@ try {
     Write-Host "Error: $($_.Exception.Message)" -ForegroundColor Red
     Write-Host "" -ForegroundColor Red
     Write-Host "This might be due to:" -ForegroundColor Yellow
-    Write-Host "• Network connectivity issues" -ForegroundColor Yellow
-    Write-Host "• Antivirus blocking the installation" -ForegroundColor Yellow  
-    Write-Host "• Insufficient disk space" -ForegroundColor Yellow
+    Write-Host "- Network connectivity issues" -ForegroundColor Yellow
+    Write-Host "- Antivirus blocking the installation" -ForegroundColor Yellow  
+    Write-Host "- Insufficient disk space" -ForegroundColor Yellow
     Write-Host "" -ForegroundColor Yellow
     Write-Host "Try running the script again, or install manually:" -ForegroundColor Yellow
     Write-Host "$python312Path -m pip install --user witticism" -ForegroundColor Gray
@@ -326,13 +324,13 @@ if (-not $SkipAutoStart) {
             # Direct Python execution for pip-installed version
             $startupContent = @"
 # Witticism Auto-Start Script
-Start-Process -FilePath "$python312Path" -ArgumentList "-m", "witticism" -WindowStyle Hidden
+Start-Process -FilePath `"$python312Path`" -ArgumentList `"-m`", `"witticism`" -WindowStyle Hidden
 "@
         } else {
             # pipx execution
             $startupContent = @"
 # Witticism Auto-Start Script  
-Start-Process -FilePath "$python312Path" -ArgumentList "-m", "pipx", "run", "witticism" -WindowStyle Hidden
+Start-Process -FilePath `"$python312Path`" -ArgumentList `"-m`", `"pipx`", `"run`", `"witticism`" -WindowStyle Hidden
 "@
         }
         
@@ -343,7 +341,7 @@ Start-Process -FilePath "$python312Path" -ArgumentList "-m", "pipx", "run", "wit
         $vbsScript = Join-Path $startupFolder "WitticismAutoStart.vbs"
         $vbsContent = @"
 Set objShell = CreateObject("WScript.Shell")
-objShell.Run "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File ""$startupScript""", 0, False
+objShell.Run "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$startupScript`"", 0, False
 "@
         Set-Content -Path $vbsScript -Value $vbsContent -Encoding UTF8
         
@@ -376,9 +374,60 @@ try {
     $shortcut.Description = "Witticism - Voice Transcription Assistant (F9 to record)"
     $shortcut.WorkingDirectory = $env:USERPROFILE
     
-    # Try to set an icon if available
-    if (Test-Path "$env:LOCALAPPDATA\Programs\Python\Python312\DLLs\_tkinter.pyd") {
-        $shortcut.IconLocation = "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe,0"
+    # Try to set a proper Witticism icon
+    $iconSet = $false
+    
+    # First, try to find the witticism package assets directory
+    try {
+        if ($isPipInstall) {
+            # For pip install, look in user site-packages
+            $sitePkgPath = & $python312Path -c "import site; print(site.getusersitepackages())" 2>$null
+        } else {
+            # For pipx install, look in the pipx venv
+            $sitePkgPath = & $python312Path -m pipx environment --value PIPX_LOCAL_VENVS 2>$null
+            if ($sitePkgPath) {
+                $sitePkgPath = Join-Path $sitePkgPath "witticism\lib\site-packages"
+            }
+        }
+        
+        if ($sitePkgPath -and (Test-Path $sitePkgPath)) {
+            $witticismPkgPath = Join-Path $sitePkgPath "witticism"
+            $assetsPath = Join-Path $witticismPkgPath "assets"
+            
+            if (Test-Path $assetsPath) {
+                # Look for a suitable icon file
+                $iconSizes = @("48x48", "32x32", "64x64", "24x24", "16x16")
+                foreach ($size in $iconSizes) {
+                    $iconPath = Join-Path $assetsPath "witticism_$size.png"
+                    if (Test-Path $iconPath) {
+                        $shortcut.IconLocation = $iconPath
+                        $iconSet = $true
+                        Write-Host "   Using Witticism icon: $iconPath" -ForegroundColor Gray
+                        break
+                    }
+                }
+                
+                # Fallback to main icon if sized icons not found
+                if (-not $iconSet) {
+                    $mainIconPath = Join-Path $assetsPath "witticism.png"
+                    if (Test-Path $mainIconPath) {
+                        $shortcut.IconLocation = $mainIconPath
+                        $iconSet = $true
+                        Write-Host "   Using Witticism icon: $mainIconPath" -ForegroundColor Gray
+                    }
+                }
+            }
+        }
+    } catch {
+        # Silently continue if icon detection fails
+    }
+    
+    # Fallback to Python icon if Witticism icon not found
+    if (-not $iconSet) {
+        if (Test-Path "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe") {
+            $shortcut.IconLocation = "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe,0"
+            Write-Host "   Using Python icon (Witticism icon not found)" -ForegroundColor Gray
+        }
     }
     
     $shortcut.Save()
@@ -437,40 +486,40 @@ Write-Host ""
 Write-Host "Installation Complete!" -ForegroundColor Green
 Write-Host ""
 Write-Host "Witticism is now installed and ready to use:" -ForegroundColor White
-Write-Host "• Double-click the desktop shortcut to launch" -ForegroundColor White
+Write-Host "- Double-click the desktop shortcut to launch" -ForegroundColor White
 if ($isPipInstall) {
-    Write-Host "• Or run: $python312Path -m witticism" -ForegroundColor White
+    Write-Host "- Or run: $python312Path -m witticism" -ForegroundColor White
 } else {
-    Write-Host "• Or run: $python312Path -m pipx run witticism" -ForegroundColor White
+    Write-Host "- Or run: $python312Path -m pipx run witticism" -ForegroundColor White
 }
-Write-Host "• Look for the system tray icon when running" -ForegroundColor White
-Write-Host "• Hold F9 to record, release to transcribe" -ForegroundColor White
+Write-Host "- Look for the system tray icon when running" -ForegroundColor White
+Write-Host "- Hold F9 to record, release to transcribe" -ForegroundColor White
 
 Write-Host ""
 Write-Host "Python Environment:" -ForegroundColor Cyan
-Write-Host "• Python: $python312Path" -ForegroundColor White
-Write-Host "• Version: $(& $python312Path --version)" -ForegroundColor White
-Write-Host "• PyTorch: CPU-optimized (maximum compatibility)" -ForegroundColor White
-Write-Host "• WhisperX: Latest compatible version" -ForegroundColor White
+Write-Host "- Python: $python312Path" -ForegroundColor White
+Write-Host "- Version: $(& $python312Path --version)" -ForegroundColor White
+Write-Host "- PyTorch: CPU-optimized (maximum compatibility)" -ForegroundColor White
+Write-Host "- WhisperX: Latest compatible version" -ForegroundColor White
 
 if (-not $SkipAutoStart) {
     Write-Host ""
     Write-Host "Auto-Start:" -ForegroundColor Cyan
-    Write-Host "• Witticism will start automatically on Windows login" -ForegroundColor Green
-    Write-Host "• Runs silently in background (system tray)" -ForegroundColor White
-    Write-Host "• To disable: Delete files from Startup folder" -ForegroundColor Gray
+    Write-Host "- Witticism will start automatically on Windows login" -ForegroundColor Green
+    Write-Host "- Runs silently in background (system tray)" -ForegroundColor White
+    Write-Host "- To disable: Delete files from Startup folder" -ForegroundColor Gray
 }
 
 Write-Host ""
 Write-Host "Next Steps:" -ForegroundColor Cyan
-Write-Host "• Launch Witticism from desktop shortcut" -ForegroundColor White
-Write-Host "• Test with F9 key (hold to record, release to type)" -ForegroundColor White
-Write-Host "• Configure settings through system tray icon" -ForegroundColor White
+Write-Host "- Launch Witticism from desktop shortcut" -ForegroundColor White
+Write-Host "- Test with F9 key (hold to record, release to type)" -ForegroundColor White
+Write-Host "- Configure settings through system tray icon" -ForegroundColor White
 Write-Host ""
-Write-Host "📋 FIRST RUN NOTES:" -ForegroundColor Yellow
-Write-Host "• First launch may take 30-60 seconds (downloading language models)" -ForegroundColor Gray
-Write-Host "• Look for the microphone icon in your system tray" -ForegroundColor Gray
-Write-Host "• If tray app doesn't appear, try running from desktop shortcut" -ForegroundColor Gray
+Write-Host "FIRST RUN NOTES:" -ForegroundColor Yellow
+Write-Host "- First launch may take 30-60 seconds (downloading language models)" -ForegroundColor Gray
+Write-Host "- Look for the microphone icon in your system tray" -ForegroundColor Gray
+Write-Host "- If tray app doesn't appear, try running from desktop shortcut" -ForegroundColor Gray
 
 Write-Host ""
 Write-Host "Enjoy fast, accurate voice transcription!" -ForegroundColor Green
