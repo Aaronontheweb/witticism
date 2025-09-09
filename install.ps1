@@ -262,6 +262,24 @@ function Get-WitticismExecutionInfo {
     return $result
 }
 
+# Function to refresh Windows icon cache
+function Update-IconCache {
+    try {
+        Write-Host "   Refreshing Windows icon cache..." -ForegroundColor Gray
+        # Method 1: Use ie4uinit.exe (most reliable)
+        $ie4uinit = Get-Command "ie4uinit.exe" -ErrorAction SilentlyContinue
+        if ($ie4uinit) {
+            Start-Process -FilePath "ie4uinit.exe" -ArgumentList "-show" -WindowStyle Hidden -Wait -ErrorAction SilentlyContinue
+            Write-Host "   [OK] Icon cache refreshed" -ForegroundColor Green
+        } else {
+            # Method 2: Alternative - just notify
+            Write-Host "   [OK] Icon cache will refresh automatically" -ForegroundColor Gray
+        }
+    } catch {
+        Write-Host "   Warning: Could not refresh icon cache: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
 if ($DryRun) {
     Write-Host "DRY RUN MODE - No changes will be made" -ForegroundColor Cyan
     Write-Host "=======================================" -ForegroundColor Cyan
@@ -501,7 +519,7 @@ try {
 
 # Function to clean up existing witticism installation
 function Remove-ExistingWitticism {
-    param($pythonPath)
+    param($pythonPath, $includeShortcuts = $false)
     
     Write-Host "Checking for existing Witticism installation..." -ForegroundColor Blue
     
@@ -526,6 +544,34 @@ function Remove-ExistingWitticism {
             }
         }
         
+        # Clean up shortcuts and startup files if requested (for ForceReinstall)
+        if ($includeShortcuts) {
+            Write-Host "   Cleaning up existing shortcuts and startup files..." -ForegroundColor Yellow
+            
+            # Remove desktop shortcut
+            $desktop = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::Desktop)
+            $shortcutPath = Join-Path $desktop "Witticism.lnk"
+            if (Test-Path $shortcutPath) {
+                Remove-Item $shortcutPath -Force -ErrorAction SilentlyContinue
+                Write-Host "   [OK] Removed desktop shortcut" -ForegroundColor Green
+            }
+            
+            # Remove startup files
+            $startupFolder = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::Startup)
+            $startupScript = Join-Path $startupFolder "WitticismAutoStart.ps1"
+            $vbsScript = Join-Path $startupFolder "WitticismAutoStart.vbs"
+            
+            if (Test-Path $startupScript) {
+                Remove-Item $startupScript -Force -ErrorAction SilentlyContinue
+                Write-Host "   [OK] Removed startup PowerShell script" -ForegroundColor Green
+            }
+            
+            if (Test-Path $vbsScript) {
+                Remove-Item $vbsScript -Force -ErrorAction SilentlyContinue
+                Write-Host "   [OK] Removed startup VBS script" -ForegroundColor Green
+            }
+        }
+        
         Write-Host "   [OK] Cleanup complete" -ForegroundColor Green
         
     } catch {
@@ -535,7 +581,7 @@ function Remove-ExistingWitticism {
 
 # Clean up existing installation if ForceReinstall or if we detect issues
 if ($ForceReinstall) {
-    Remove-ExistingWitticism $python312Path
+    Remove-ExistingWitticism $python312Path -includeShortcuts $true
 }
 
 # Install witticism with Python 3.12 compatibility focus  
@@ -706,6 +752,9 @@ try {
     $shortcut.Save()
     
     Write-Host "SUCCESS: Desktop shortcut created" -ForegroundColor Green
+    
+    # Refresh icon cache to show new Witticism icon instead of cached Python icon
+    Update-IconCache
 } catch {
     Write-Host "WARNING: Could not create desktop shortcut: $($_.Exception.Message)" -ForegroundColor Yellow
     Write-Host "   You can manually create a shortcut with target:" -ForegroundColor Yellow
