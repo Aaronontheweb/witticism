@@ -33,12 +33,12 @@ No manual Python version management required!
     exit 0
 }
 
-Write-Host "🎙️ Installing Witticism on Windows..." -ForegroundColor Green
+Write-Host "Installing Witticism on Windows..." -ForegroundColor Green
 
 # Check if running as Administrator
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if ($isAdmin) {
-    Write-Host "❌ Please don't run this installer as Administrator!" -ForegroundColor Red
+    Write-Host "ERROR: Please don't run this installer as Administrator!" -ForegroundColor Red
     Write-Host "   Run it as your regular user account." -ForegroundColor Yellow
     Write-Host "   The script will handle any necessary permissions." -ForegroundColor Yellow
     exit 1
@@ -56,7 +56,7 @@ function Install-Python312 {
     try {
         Invoke-WebRequest -Uri $pythonUrl -OutFile $pythonInstaller -UseBasicParsing
     } catch {
-        Write-Host "❌ Failed to download Python installer: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "ERROR: Failed to download Python installer: $($_.Exception.Message)" -ForegroundColor Red
         exit 1
     }
     
@@ -79,7 +79,7 @@ function Install-Python312 {
     $process = Start-Process -FilePath $pythonInstaller -ArgumentList $installArgs -Wait -PassThru
     
     if ($process.ExitCode -eq 0) {
-        Write-Host "✓ Python 3.12.10 installed successfully" -ForegroundColor Green
+        Write-Host "Python 3.12.10 installed successfully" -ForegroundColor Green
         
         # Refresh PATH for current session
         $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "User") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "Machine")
@@ -89,7 +89,7 @@ function Install-Python312 {
         
         return $true
     } else {
-        Write-Host "❌ Python installation failed with exit code $($process.ExitCode)" -ForegroundColor Red
+        Write-Host "Python installation failed with exit code $($process.ExitCode)" -ForegroundColor Red
         Remove-Item $pythonInstaller -ErrorAction SilentlyContinue
         return $false
     }
@@ -150,25 +150,25 @@ if (-not $python312Path) {
     $python312Path = Get-Python312Path
     
     if (-not $python312Path) {
-        Write-Host "❌ Could not locate Python 3.12 after installation" -ForegroundColor Red
+        Write-Host "ERROR: Could not locate Python 3.12 after installation" -ForegroundColor Red
         Write-Host "   Please restart your terminal and try again" -ForegroundColor Yellow
         exit 1
     }
 }
 
-Write-Host "✓ Using Python 3.12: $python312Path" -ForegroundColor Green
+Write-Host "SUCCESS: Using Python 3.12: $python312Path" -ForegroundColor Green
 
 # Verify Python version is exactly what we need
 try {
     $pythonVersion = & $python312Path --version 2>&1
-    Write-Host "✓ Verified: $pythonVersion" -ForegroundColor Green
+    Write-Host "SUCCESS: Verified: $pythonVersion" -ForegroundColor Green
     
     if (-not ($pythonVersion -match "Python 3\.12")) {
-        Write-Host "❌ Expected Python 3.12, got: $pythonVersion" -ForegroundColor Red
+        Write-Host "ERROR: Expected Python 3.12, got: $pythonVersion" -ForegroundColor Red
         exit 1
     }
 } catch {
-    Write-Host "❌ Could not verify Python version: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "ERROR: Could not verify Python version: $($_.Exception.Message)" -ForegroundColor Red
     exit 1
 }
 
@@ -176,16 +176,16 @@ try {
 try {
     $pipxVersion = & $python312Path -m pipx --version 2>&1
     if ($LASTEXITCODE -eq 0) {
-        Write-Host "✓ pipx already installed: $pipxVersion" -ForegroundColor Green
+        Write-Host "SUCCESS: pipx already installed: $pipxVersion" -ForegroundColor Green
     } else {
         throw "pipx not available"
     }
 } catch {
-    Write-Host "📦 Installing pipx package manager with Python 3.12..." -ForegroundColor Blue
+    Write-Host "Installing pipx package manager with Python 3.12..." -ForegroundColor Blue
     & $python312Path -m pip install --user pipx
     
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "❌ Failed to install pipx" -ForegroundColor Red
+        Write-Host "ERROR: Failed to install pipx" -ForegroundColor Red
         exit 1
     }
     
@@ -206,11 +206,11 @@ try {
         }
     }
     
-    Write-Host "✓ pipx installed with Python 3.12" -ForegroundColor Green
+    Write-Host "SUCCESS: pipx installed with Python 3.12" -ForegroundColor Green
 }
 
 # Install witticism with Python 3.12 compatibility focus
-Write-Host "📦 Installing Witticism..." -ForegroundColor Blue
+Write-Host "Installing Witticism..." -ForegroundColor Blue
 
 # Force CPU-only PyTorch for Python 3.12 compatibility
 $indexUrl = "https://download.pytorch.org/whl/cpu"
@@ -224,7 +224,7 @@ try {
     & $python312Path -m pipx install witticism $pipArgs
     
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "⚠️ Standard installation failed, trying alternative method..." -ForegroundColor Yellow
+        Write-Host "WARNING: Standard installation failed, trying alternative method..." -ForegroundColor Yellow
         
         # Alternative: Use pip directly in user space
         & $python312Path -m pip install --user witticism --index-url $indexUrl --extra-index-url https://pypi.org/simple
@@ -233,14 +233,14 @@ try {
             throw "Both pipx and pip installation methods failed"
         }
         
-        Write-Host "✓ Witticism installed with pip (user mode)" -ForegroundColor Green
+        Write-Host "SUCCESS: Witticism installed with pip (user mode)" -ForegroundColor Green
         $isPipInstall = $true
     } else {
-        Write-Host "✓ Witticism installed with pipx" -ForegroundColor Green
+        Write-Host "SUCCESS: Witticism installed with pipx" -ForegroundColor Green
         $isPipInstall = $false
     }
 } catch {
-    Write-Host "❌ Failed to install Witticism" -ForegroundColor Red
+    Write-Host "ERROR: Failed to install Witticism" -ForegroundColor Red
     Write-Host "Error: $($_.Exception.Message)" -ForegroundColor Red
     Write-Host "" -ForegroundColor Red
     Write-Host "This might be due to:" -ForegroundColor Yellow
@@ -255,7 +255,7 @@ try {
 
 # Set up auto-start (unless skipped)  
 if (-not $SkipAutoStart) {
-    Write-Host "🚀 Setting up auto-start..." -ForegroundColor Blue
+    Write-Host "Setting up auto-start..." -ForegroundColor Blue
     
     try {
         # Create a PowerShell script for auto-start (more reliable than batch)
@@ -287,18 +287,18 @@ objShell.Run "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File "
 "@
         Set-Content -Path $vbsScript -Value $vbsContent -Encoding UTF8
         
-        Write-Host "✓ Auto-start configured" -ForegroundColor Green
+        Write-Host "SUCCESS: Auto-start configured" -ForegroundColor Green
         Write-Host "   Witticism will start automatically on Windows login" -ForegroundColor Green
         Write-Host "   Files created: WitticismAutoStart.vbs, WitticismAutoStart.ps1" -ForegroundColor Gray
     } catch {
-        Write-Host "⚠️ Could not set up auto-start: $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host "WARNING: Could not set up auto-start: $($_.Exception.Message)" -ForegroundColor Yellow
         Write-Host "   You can manually add Witticism to your startup programs:" -ForegroundColor Yellow
         Write-Host "   $python312Path -m witticism" -ForegroundColor Gray
     }
 }
 
 # Create desktop shortcut
-Write-Host "🖥️ Creating desktop shortcut..." -ForegroundColor Blue
+Write-Host "Creating desktop shortcut..." -ForegroundColor Blue
 try {
     $desktop = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::Desktop)
     $shortcutPath = Join-Path $desktop "Witticism.lnk"
@@ -323,9 +323,9 @@ try {
     
     $shortcut.Save()
     
-    Write-Host "✓ Desktop shortcut created" -ForegroundColor Green
+    Write-Host "SUCCESS: Desktop shortcut created" -ForegroundColor Green
 } catch {
-    Write-Host "⚠️ Could not create desktop shortcut: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Host "WARNING: Could not create desktop shortcut: $($_.Exception.Message)" -ForegroundColor Yellow
     Write-Host "   You can manually create a shortcut with target:" -ForegroundColor Yellow
     if ($isPipInstall) {
         Write-Host "   $python312Path -m witticism" -ForegroundColor Gray
@@ -335,7 +335,7 @@ try {
 }
 
 # Test the installation
-Write-Host "🧪 Testing installation..." -ForegroundColor Blue
+Write-Host "Testing installation..." -ForegroundColor Blue
 try {
     $testCmd = if ($isPipInstall) { 
         "& '$python312Path' -m witticism --version"
@@ -345,17 +345,17 @@ try {
     
     $version = Invoke-Expression $testCmd 2>&1
     if ($version -match "witticism") {
-        Write-Host "✓ Installation test passed: $version" -ForegroundColor Green
+        Write-Host "SUCCESS: Installation test passed: $version" -ForegroundColor Green
     } else {
-        Write-Host "⚠️ Installation test inconclusive" -ForegroundColor Yellow  
+        Write-Host "WARNING: Installation test inconclusive" -ForegroundColor Yellow  
     }
 } catch {
-    Write-Host "⚠️ Could not test installation: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Host "WARNING: Could not test installation: $($_.Exception.Message)" -ForegroundColor Yellow
 }
 
 # Installation complete
 Write-Host ""
-Write-Host "🎉 Installation Complete!" -ForegroundColor Green
+Write-Host "Installation Complete!" -ForegroundColor Green
 Write-Host ""
 Write-Host "Witticism is now installed and ready to use:" -ForegroundColor White
 Write-Host "• Double-click the desktop shortcut to launch" -ForegroundColor White
@@ -389,5 +389,5 @@ Write-Host "• Test with F9 key (hold to record, release to type)" -ForegroundC
 Write-Host "• Configure settings through system tray icon" -ForegroundColor White
 
 Write-Host ""
-Write-Host "Enjoy fast, accurate voice transcription! 🎙️✨" -ForegroundColor Green
-Write-Host "No Python version juggling required - it just works! 🚀" -ForegroundColor Green
+Write-Host "Enjoy fast, accurate voice transcription!" -ForegroundColor Green
+Write-Host "No Python version juggling required - it just works!" -ForegroundColor Green

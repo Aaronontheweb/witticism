@@ -46,8 +46,17 @@ jobs:
     - name: Verify installation
       run: |
         echo "Verifying installation..."
-        ~/.local/bin/witticism --version
-        echo "✓ Witticism installed and working"
+        # Check if witticism is in PATH
+        if command -v witticism &> /dev/null; then
+          witticism --version
+        elif [ -f ~/.local/bin/witticism ]; then
+          ~/.local/bin/witticism --version
+        else
+          echo "ERROR: witticism executable not found"
+          ls -la ~/.local/bin/ || echo "~/.local/bin/ does not exist"
+          exit 1
+        fi
+        echo "SUCCESS: Witticism installed and working"
     
     - name: Test install script (second run - idempotency)
       run: |
@@ -60,8 +69,16 @@ jobs:
     - name: Verify installation still works after second run
       run: |
         echo "Verifying installation after second run..."
-        ~/.local/bin/witticism --version
-        echo "✓ Witticism still working after idempotent install"
+        # Check if witticism is in PATH
+        if command -v witticism &> /dev/null; then
+          witticism --version
+        elif [ -f ~/.local/bin/witticism ]; then
+          ~/.local/bin/witticism --version
+        else
+          echo "ERROR: witticism executable not found after second run"
+          exit 1
+        fi
+        echo "SUCCESS: Witticism still working after idempotent install"
 
   test-windows-install:
     runs-on: windows-latest
@@ -108,12 +125,12 @@ jobs:
             # Try pipx first
             try {
                 & $pythonPath -m pipx run witticism --version
-                Write-Host "✓ Witticism working via pipx"
+                Write-Host "SUCCESS: Witticism working via pipx"
             } catch {
                 # Try direct pip installation
                 try {
                     & $pythonPath -m witticism --version
-                    Write-Host "✓ Witticism working via pip"
+                    Write-Host "SUCCESS: Witticism working via pip"
                 } catch {
                     Write-Host "❌ Witticism not working"
                     throw "Installation verification failed"
@@ -156,11 +173,11 @@ jobs:
             # Try pipx first, then pip
             try {
                 & $pythonPath -m pipx run witticism --version
-                Write-Host "✓ Witticism still working via pipx after idempotent install"
+                Write-Host "SUCCESS: Witticism still working via pipx after idempotent install"
             } catch {
                 try {
                     & $pythonPath -m witticism --version
-                    Write-Host "✓ Witticism still working via pip after idempotent install"
+                    Write-Host "SUCCESS: Witticism still working via pip after idempotent install"
                 } catch {
                     throw "Installation verification failed after second run"
                 }
@@ -196,9 +213,12 @@ jobs:
         # Install CPU-only version
         pipx install witticism
         
-        # Verify installation
-        witticism --version
-        echo "✓ Manual installation successful"
+        # Verify installation (with mock display for pynput)
+        DISPLAY=:99 witticism --version 2>/dev/null || witticism --version
+        echo "SUCCESS: Manual installation successful"
+      env:
+        # Provide fake display for pynput compatibility in headless CI
+        DISPLAY: ':99'
 
   test-windows-manual:
     runs-on: windows-latest
@@ -226,4 +246,4 @@ jobs:
         
         # Verify installation
         python -m pipx run witticism --version
-        Write-Host "✓ Manual Windows installation successful"
+        Write-Host "Manual Windows installation successful"
