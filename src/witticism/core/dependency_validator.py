@@ -52,7 +52,7 @@ class DependencyValidator:
         """Detect if we're running in a headless/display-less environment"""
         # Most reliable for CI environments
         return (
-            not os.environ.get('DISPLAY') and 
+            not os.environ.get('DISPLAY') and
             os.environ.get('CI') == 'true'
         ) or (
             # GitHub Actions specific

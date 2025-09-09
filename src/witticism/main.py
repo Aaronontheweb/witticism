@@ -11,7 +11,7 @@ from pathlib import Path
 def _is_headless_environment():
     """Detect if we're running in a headless/display-less environment"""
     return (
-        not os.environ.get('DISPLAY') and 
+        not os.environ.get('DISPLAY') and
         os.environ.get('CI') == 'true'
     ) or (
         os.environ.get('GITHUB_ACTIONS') == 'true'
@@ -33,7 +33,7 @@ if not _is_headless_environment():
         QApplication = QtW.QApplication
         QMessageBox = QtW.QMessageBox
         Qt = QtCore.Qt
-    
+
     # These imports may require display access (pynput, PyQt5, audio)
     from witticism.core.whisperx_engine import WhisperXEngine
     from witticism.core.audio_capture import PushToTalkCapture
