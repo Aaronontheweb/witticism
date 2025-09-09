@@ -80,9 +80,12 @@ jobs:
         fi
         echo "SUCCESS: Witticism still working after idempotent install"
 
-  test-windows-install:
+  # TODO: Re-enable after Windows support is released to PyPI
+  # Currently disabled because the live PyPI package doesn't include Windows support yet
+  test-windows-install-disabled:
+    if: false  # Temporarily disabled
     runs-on: windows-latest
-    name: Test Windows Install Script
+    name: Test Windows Install Script (Disabled - Pre-Release)
     
     steps:
     - name: Checkout code
@@ -220,9 +223,11 @@ jobs:
         # Provide fake display for pynput compatibility in headless CI
         DISPLAY: ':99'
 
-  test-windows-manual:
+  # TODO: Re-enable after Windows support is released to PyPI  
+  test-windows-manual-disabled:
+    if: false  # Temporarily disabled
     runs-on: windows-latest
-    name: Test Windows Manual Installation Steps
+    name: Test Windows Manual Installation Steps (Disabled - Pre-Release)
     
     steps:
     - name: Checkout code
