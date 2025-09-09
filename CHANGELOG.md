@@ -7,14 +7,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### 🔧 Fixes
+## [0.6.0-beta1] - 2025-09-09
 
-#### NVIDIA Suspend/Resume Fix
-- **Root cause identified and fixed** - CUDA crashes after suspend/resume were caused by nvidia_uvm kernel module corruption
-- **Automatic system configuration** - Installer now configures NVIDIA to preserve GPU memory across suspend cycles
+### 🚀 Major Beta Release: Complete Windows Platform Support
+
+This beta release introduces comprehensive Windows support, bringing Witticism to Windows users with a complete cross-platform architecture while maintaining full Linux compatibility.
+
+### ✨ New Features
+
+#### 🪟 Windows Platform Support
+- **Complete Windows compatibility** - First-class Windows support with cross-platform architecture
+- **PowerShell installer (install.ps1)** - One-line Windows installation with automated Python management
+- **Automated Python 3.12 setup** - Handles Python version compatibility issues automatically for WhisperX
+- **Auto-start functionality** - Silent background startup via Windows startup folder integration
+- **Desktop integration** - Shortcuts and proper Windows application integration
+
+#### 🔧 Cross-Platform Architecture  
+- **Platform-specific sleep monitoring** - Windows uses PowerShell/WMI events, Linux continues using DBus
+- **Cross-platform file locking** - Windows msvcrt implementation, Linux fcntl (prevents multi-instance issues)
+- **Conditional dependencies** - pydbus now Linux-only using platform markers, preventing Windows installation issues
+- **Unicode console compatibility** - ASCII fallbacks for Windows terminal compatibility
+
+#### 🎯 Enhanced Installation Experience
+- **Smart GPU detection** - Automatic CUDA version detection and PyTorch index selection on Windows
+- **CPU-optimized setup** - Installs CPU-only PyTorch for maximum Windows compatibility  
+- **Dual installation methods** - Supports both pipx and direct pip installation with automatic fallback
+- **Comprehensive error handling** - Clear error messages and troubleshooting guidance for Windows users
+
+#### 📚 Documentation & Guides
+- **INSTALL_WINDOWS.md** - Comprehensive Windows installation guide with troubleshooting
+- **Updated README.md** - Added Windows installation instructions alongside existing Linux guide
+- **Cross-platform compatibility notes** - Clear documentation of platform-specific features
+
+### 🔧 Fixed
+
+#### NVIDIA Suspend/Resume Fix (Linux)
+- **Root cause identified and fixed** - CUDA crashes after suspend/resume were caused by nvidia_uvm kernel module corruption  
+- **Automatic system configuration** - Linux installer now configures NVIDIA to preserve GPU memory across suspend cycles
 - **Idempotent installation** - Configuration is checked and only applied if needed, safe for re-runs and upgrades
-- Fixes months of SIGABRT crashes that occurred after system suspend/resume cycles
+- Fixes months of SIGABRT crashes that occurred after system suspend/resume cycles on Linux systems
 - Solution based on research from PyTorch forums and Ask Ubuntu community
+
+#### Cross-Platform Compatibility
+- **Headless environment support** - Application now works in CI environments without display (fixes --version in GitHub Actions)
+- **Python version constraints** - Limited to Python <3.13 for WhisperX compatibility across platforms
+- **Unicode handling** - Fixed console output issues on Windows terminals
+
+### 🧪 Testing & CI
+- **Automated installer testing** - GitHub Actions workflow tests both Linux and Windows installers  
+- **Idempotency verification** - Ensures installer scripts can be run multiple times safely
+- **Version verification** - Confirms functionality after installation on both platforms
+- **Cross-platform CI** - Comprehensive testing pipeline for both Linux and Windows environments
+
+### 🚀 Technical Improvements
+- **Smart dependency management** - Platform-specific dependencies prevent installation conflicts
+- **Enhanced error handling** - Better error messages and fallback behavior across platforms  
+- **Modular architecture** - Clean separation of platform-specific and shared components
+- **Installation verification** - Built-in testing and verification of successful installation
+
+### 📊 Platform Compatibility
+- **Windows** - Full support with CPU-only transcription, auto-start, and silent background operation
+- **Linux** - Maintains all existing functionality including GPU acceleration and systemd integration  
+- **Future-ready** - Architecture prepared for macOS support in future releases
+
+This beta release represents a major milestone, transforming Witticism from a Linux-only application into a truly cross-platform voice transcription tool. Windows users can now enjoy the same push-to-talk transcription experience that Linux users have had, with a streamlined one-command installation process.
 
 ## [0.5.0] - 2025-08-24
 
@@ -273,7 +329,9 @@ This release completes the foundational observability and recovery systems that 
 - Audio device selection
 - Configuration persistence
 
-[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/0.4.6...HEAD
+[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/v0.6.0-beta1...HEAD
+[0.6.0-beta1]: https://github.com/Aaronontheweb/witticism/compare/0.5.0...v0.6.0-beta1
+[0.5.0]: https://github.com/Aaronontheweb/witticism/compare/0.4.6...0.5.0
 [0.4.6]: https://github.com/Aaronontheweb/witticism/compare/0.4.5...0.4.6
 [0.4.5]: https://github.com/Aaronontheweb/witticism/compare/0.4.4...0.4.5
 [0.4.4]: https://github.com/Aaronontheweb/witticism/compare/0.4.3...0.4.4
