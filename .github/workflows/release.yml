@@ -49,19 +49,30 @@ jobs:
         files: |
           dist/*
           install.sh
+          install.ps1
           upgrade.sh
         body: |
           ## Installation
           
-          ### Quick Install (Linux)
+          ### Quick Install
+          
+          **Linux/macOS:**
           ```bash
           curl -sSL https://raw.githubusercontent.com/Aaronontheweb/witticism/${{ github.ref_name }}/install.sh | bash
           ```
           
+          **Windows:**
+          ```powershell
+          irm https://raw.githubusercontent.com/Aaronontheweb/witticism/${{ github.ref_name }}/install.ps1 | iex
+          ```
+          
           ### Upgrade
+          **Linux/macOS:**
           ```bash
           curl -sSL https://raw.githubusercontent.com/Aaronontheweb/witticism/${{ github.ref_name }}/upgrade.sh | bash
           ```
+          
+          **Windows:** Re-run the install command above
           
           ### Manual Install
           ```bash
@@ -71,6 +82,6 @@ jobs:
           ## What's Changed
           See [CHANGELOG.md](https://github.com/Aaronontheweb/witticism/blob/${{ github.ref_name }}/CHANGELOG.md)
         draft: false
-        prerelease: false
+        prerelease: ${{ contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') || contains(github.ref_name, 'rc') }}
         generate_release_notes: true
 
