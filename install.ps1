@@ -35,6 +35,233 @@ if ($Help) {
     exit 0
 }
 
+# Function to find Witticism package path and icon
+function Get-WitticismPackageInfo {
+    param(
+        [string]$pythonPath,
+        [bool]$isPipInstall,
+        [bool]$verbose = $false
+    )
+    
+    $result = @{
+        PackagePath = $null
+        IconPath = $null
+        IconSet = $false
+    }
+    
+    if ($verbose) {
+        Write-Host "   Detecting Witticism package location..." -ForegroundColor Gray
+    }
+    
+    if ($isPipInstall) {
+        # For pip install, look in user site-packages
+        if ($verbose) {
+            Write-Host "   Install type: pip (direct Python package installation)" -ForegroundColor Gray
+        }
+        $sitePkgPath = & $pythonPath -c "import site; print(site.getusersitepackages())" 2>$null
+        if ($verbose) {
+            Write-Host "   User site-packages path: $sitePkgPath" -ForegroundColor Gray
+        }
+        if ($sitePkgPath -and (Test-Path $sitePkgPath)) {
+            $result.PackagePath = Join-Path $sitePkgPath "witticism"
+            if ($verbose) {
+                Write-Host "   Expected witticism package path: $($result.PackagePath)" -ForegroundColor Gray
+                Write-Host "   Package exists: $(Test-Path $result.PackagePath)" -ForegroundColor Gray
+            }
+        }
+    } else {
+        # For pipx install, get the actual pipx venv path with proper environment variable expansion
+        if ($verbose) {
+            Write-Host "   Install type: pipx (isolated virtual environment)" -ForegroundColor Gray
+        }
+        
+        # Get PIPX_LOCAL_VENVS and expand any environment variables
+        $pipxVenvRootRaw = & $pythonPath -m pipx environment --value PIPX_LOCAL_VENVS 2>$null
+        if ($pipxVenvRootRaw) {
+            # Expand environment variables like %USERPROFILE%
+            $pipxVenvRoot = [System.Environment]::ExpandEnvironmentVariables($pipxVenvRootRaw)
+            if ($verbose) {
+                Write-Host "   PIPX_LOCAL_VENVS (raw): $pipxVenvRootRaw" -ForegroundColor Gray
+                Write-Host "   PIPX_LOCAL_VENVS (expanded): $pipxVenvRoot" -ForegroundColor Gray
+            }
+            
+            $pipxVenvPaths = @(
+                "$pipxVenvRoot\witticism\Lib\site-packages",
+                "$pipxVenvRoot\witticism\lib\site-packages"
+            )
+        } else {
+            if ($verbose) {
+                Write-Host "   Warning: Could not get PIPX_LOCAL_VENVS, using fallback paths" -ForegroundColor Yellow
+            }
+            # Fallback to common Windows pipx paths
+            $pipxVenvPaths = @(
+                "$env:USERPROFILE\pipx\venvs\witticism\Lib\site-packages",
+                "$env:LOCALAPPDATA\pipx\venvs\witticism\Lib\site-packages",
+                "$env:USERPROFILE\.local\pipx\venvs\witticism\lib\site-packages"
+            )
+        }
+        
+        if ($verbose) {
+            Write-Host "   Searching for witticism package in paths:" -ForegroundColor Gray
+            foreach ($path in $pipxVenvPaths) {
+                Write-Host "   - $path" -ForegroundColor Gray
+            }
+        }
+        
+        foreach ($venvPath in $pipxVenvPaths) {
+            $testWitticismPath = Join-Path $venvPath "witticism"
+            $pathExists = Test-Path $testWitticismPath
+            if ($verbose) {
+                Write-Host "   Checking: $testWitticismPath - Exists: $pathExists" -ForegroundColor Gray
+            }
+            if ($pathExists) {
+                $result.PackagePath = $testWitticismPath
+                if ($verbose) {
+                    Write-Host "   [OK] Found witticism package at: $($result.PackagePath)" -ForegroundColor Green
+                }
+                break
+            }
+        }
+    }
+    
+    # Now find the icon if package was found
+    if ($result.PackagePath -and (Test-Path $result.PackagePath)) {
+        $assetsPath = Join-Path $result.PackagePath "assets"
+        if ($verbose) {
+            Write-Host "   Assets path: $assetsPath" -ForegroundColor Gray
+            Write-Host "   Assets directory exists: $(Test-Path $assetsPath)" -ForegroundColor Gray
+        }
+        
+        if (Test-Path $assetsPath) {
+            if ($verbose) {
+                Write-Host "   Available icon files:" -ForegroundColor Gray
+                Get-ChildItem -Path $assetsPath -Name "*.png" | ForEach-Object {
+                    Write-Host "   - $_" -ForegroundColor Gray
+                }
+            }
+            
+            # Look for a suitable icon file
+            $iconSizes = @("48x48", "32x32", "64x64", "24x24", "16x16")
+            foreach ($size in $iconSizes) {
+                $iconPath = Join-Path $assetsPath "witticism_$size.png"
+                if ($verbose) {
+                    Write-Host "   Checking for icon: witticism_$size.png - Exists: $(Test-Path $iconPath)" -ForegroundColor Gray
+                }
+                if (Test-Path $iconPath) {
+                    # Ensure path is fully resolved and properly formatted
+                    $result.IconPath = (Resolve-Path $iconPath).Path
+                    $result.IconSet = $true
+                    if ($verbose) {
+                        Write-Host "   [OK] Found icon: $($result.IconPath)" -ForegroundColor Green
+                    }
+                    break
+                }
+            }
+            
+            # Fallback to main icon if sized icons not found
+            if (-not $result.IconSet) {
+                $mainIconPath = Join-Path $assetsPath "witticism.png"
+                if ($verbose) {
+                    Write-Host "   Checking fallback icon: witticism.png - Exists: $(Test-Path $mainIconPath)" -ForegroundColor Gray
+                }
+                if (Test-Path $mainIconPath) {
+                    $result.IconPath = (Resolve-Path $mainIconPath).Path
+                    $result.IconSet = $true
+                    if ($verbose) {
+                        Write-Host "   [OK] Found fallback icon: $($result.IconPath)" -ForegroundColor Green
+                    }
+                }
+            }
+        } else {
+            if ($verbose) {
+                Write-Host "   Assets directory not found!" -ForegroundColor Red
+            }
+        }
+    } else {
+        if ($verbose) {
+            Write-Host "   Witticism package not found or not accessible" -ForegroundColor Red
+        }
+    }
+    
+    if (-not $result.IconSet -and $verbose) {
+        Write-Host "   Would fallback to Python icon" -ForegroundColor Yellow
+    }
+    
+    return $result
+}
+
+# Function to get the best execution path for Witticism
+function Get-WitticismExecutionInfo {
+    param(
+        [string]$pythonPath,
+        [bool]$isPipInstall,
+        [bool]$verbose = $false
+    )
+    
+    $result = @{
+        TargetPath = $null
+        Arguments = $null
+        Description = $null
+        UsesConsole = $true
+    }
+    
+    # Check for pythonw.exe to avoid console windows
+    $pythonwPath = $pythonPath -replace "python\.exe$", "pythonw.exe"
+    $usesPythonw = Test-Path $pythonwPath
+    
+    if ($isPipInstall) {
+        if ($usesPythonw) {
+            $result.TargetPath = $pythonwPath
+            $result.Arguments = "-m witticism"
+            $result.Description = "$pythonwPath -m witticism (no console)"
+            $result.UsesConsole = $false
+        } else {
+            $result.TargetPath = $pythonPath
+            $result.Arguments = "-m witticism"
+            $result.Description = "$pythonPath -m witticism"
+            $result.UsesConsole = $true
+        }
+    } else {
+        # For pipx, try to use the direct witticism.exe if available (best - no console)
+        $witticismBinDir = & $pythonPath -m pipx environment --value PIPX_BIN_DIR 2>$null
+        if ($witticismBinDir) {
+            $witticismExePath = Join-Path $witticismBinDir "witticism.exe"
+            if ($verbose) {
+                Write-Host "   Checking for witticism.exe at: $witticismExePath" -ForegroundColor Gray
+            }
+            if (Test-Path $witticismExePath) {
+                $result.TargetPath = $witticismExePath
+                $result.Arguments = ""
+                $result.Description = "$witticismExePath (direct exe, no console)"
+                $result.UsesConsole = $false
+                if ($verbose) {
+                    Write-Host "   [OK] Using direct witticism.exe" -ForegroundColor Green
+                }
+                return $result
+            }
+        }
+        
+        # Fallback to pythonw/python -m pipx run
+        if ($usesPythonw) {
+            $result.TargetPath = $pythonwPath
+            $result.Arguments = "-m pipx run witticism"
+            $result.Description = "$pythonwPath -m pipx run witticism (no console)"
+            $result.UsesConsole = $false
+        } else {
+            $result.TargetPath = $pythonPath
+            $result.Arguments = "-m pipx run witticism"
+            $result.Description = "$pythonPath -m pipx run witticism"
+            $result.UsesConsole = $true
+        }
+    }
+    
+    if ($verbose) {
+        Write-Host "   Execution: $($result.Description)" -ForegroundColor Gray
+    }
+    
+    return $result
+}
+
 if ($DryRun) {
     Write-Host "DRY RUN MODE - No changes will be made" -ForegroundColor Cyan
     Write-Host "=======================================" -ForegroundColor Cyan
@@ -165,7 +392,7 @@ if (-not $python312Path) {
 
 Write-Host "SUCCESS: Using Python 3.12: $python312Path" -ForegroundColor Green
 
-# If dry run, test icon detection and shortcut logic
+# If dry run, test the REAL functions that will be used
 if ($DryRun) {
     Write-Host ""
     Write-Host "=== DRY RUN: Would continue with installation ===" -ForegroundColor Cyan
@@ -174,128 +401,24 @@ if ($DryRun) {
     Write-Host "Force reinstall: $ForceReinstall" -ForegroundColor Gray
     Write-Host "Skip auto-start: $SkipAutoStart" -ForegroundColor Gray
     
-    # Test if witticism is already installed to simulate desktop shortcut creation
-    Write-Host ""
-    Write-Host "=== DRY RUN: Testing Desktop Shortcut Logic ===" -ForegroundColor Cyan
-    
     # Determine installation type (simulating what would happen after install)
     $isPipInstall = $false  # Assume pipx for now since that's what we use
     Write-Host "Simulated install type: $(if ($isPipInstall) { 'pip' } else { 'pipx' })" -ForegroundColor Yellow
     
-    # Test shortcut target detection
-    if ($isPipInstall) {
-        Write-Host "Desktop shortcut would target: $python312Path -m witticism" -ForegroundColor Gray
-    } else {
-        # For pipx, try to find the direct witticism.exe
-        $witticismBinDir = & $python312Path -m pipx environment --value PIPX_BIN_DIR 2>$null
-        if ($witticismBinDir) {
-            $witticismExePath = Join-Path $witticismBinDir "witticism.exe"
-            Write-Host "PIPX_BIN_DIR: $witticismBinDir" -ForegroundColor Gray
-            Write-Host "Expected witticism.exe path: $witticismExePath" -ForegroundColor Gray
-            Write-Host "witticism.exe exists: $(Test-Path $witticismExePath)" -ForegroundColor Gray
-            
-            if (Test-Path $witticismExePath) {
-                Write-Host "Desktop shortcut would target: $witticismExePath" -ForegroundColor Green
-            } else {
-                Write-Host "Desktop shortcut would target: $python312Path -m pipx run witticism" -ForegroundColor Yellow
-            }
-        }
-    }
-    
-    # Now test icon detection logic (copy from the shortcut creation section)
-    $iconSet = $false
-    $witticismPkgPath = $null
+    Write-Host ""
+    Write-Host "=== DRY RUN: Testing Execution Path Detection ===" -ForegroundColor Cyan
+    $execInfo = Get-WitticismExecutionInfo -pythonPath $python312Path -isPipInstall $isPipInstall -verbose $true
+    Write-Host "   Would use: $($execInfo.Description)" -ForegroundColor $(if ($execInfo.UsesConsole) { 'Yellow' } else { 'Green' })
     
     Write-Host ""
-    Write-Host "=== DRY RUN: Icon Detection ===" -ForegroundColor Cyan
-    
-    if ($isPipInstall) {
-        Write-Host "Install type: pip (direct Python package installation)" -ForegroundColor Yellow
-        $sitePkgPath = & $python312Path -c "import site; print(site.getusersitepackages())" 2>$null
-        Write-Host "User site-packages path: $sitePkgPath" -ForegroundColor Gray
-        if ($sitePkgPath -and (Test-Path $sitePkgPath)) {
-            $witticismPkgPath = Join-Path $sitePkgPath "witticism"
-            Write-Host "Expected witticism package path: $witticismPkgPath" -ForegroundColor Gray
-            Write-Host "Package exists: $(Test-Path $witticismPkgPath)" -ForegroundColor Gray
-        }
+    Write-Host "=== DRY RUN: Testing Icon Detection ===" -ForegroundColor Cyan
+    $packageInfo = Get-WitticismPackageInfo -pythonPath $python312Path -isPipInstall $isPipInstall -verbose $true
+    if ($packageInfo.IconSet) {
+        Write-Host "   Would use icon: $($packageInfo.IconPath)" -ForegroundColor Green
     } else {
-        Write-Host "Install type: pipx (isolated virtual environment)" -ForegroundColor Yellow
-        $pipxVenvRoot = & $python312Path -m pipx environment --value PIPX_LOCAL_VENVS 2>$null
-        Write-Host "PIPX_LOCAL_VENVS: $pipxVenvRoot" -ForegroundColor Gray
-        
-        if ($pipxVenvRoot) {
-            $pipxVenvPaths = @(
-                "$pipxVenvRoot\witticism\Lib\site-packages",
-                "$pipxVenvRoot\witticism\lib\site-packages"
-            )
-        } else {
-            $pipxVenvPaths = @(
-                "$env:USERPROFILE\pipx\venvs\witticism\Lib\site-packages",
-                "$env:LOCALAPPDATA\pipx\venvs\witticism\Lib\site-packages",
-                "$env:USERPROFILE\.local\pipx\venvs\witticism\lib\site-packages"
-            )
-        }
-        
-        Write-Host "Searching for witticism package in paths:" -ForegroundColor Gray
-        foreach ($path in $pipxVenvPaths) {
-            Write-Host "  - $path" -ForegroundColor Gray
-        }
-        
-        foreach ($venvPath in $pipxVenvPaths) {
-            $testWitticismPath = Join-Path $venvPath "witticism"
-            Write-Host "  Checking: $testWitticismPath - Exists: $(Test-Path $testWitticismPath)" -ForegroundColor Gray
-            if (Test-Path $testWitticismPath) {
-                $witticismPkgPath = $testWitticismPath
-                Write-Host "   Found witticism package at: $witticismPkgPath" -ForegroundColor Green
-                break
-            }
-        }
-    }
-    
-    if ($witticismPkgPath -and (Test-Path $witticismPkgPath)) {
-        $assetsPath = Join-Path $witticismPkgPath "assets"
-        Write-Host "Assets path: $assetsPath" -ForegroundColor Gray
-        Write-Host "Assets directory exists: $(Test-Path $assetsPath)" -ForegroundColor Gray
-        
-        if (Test-Path $assetsPath) {
-            Write-Host "Available icon files:" -ForegroundColor Gray
-            Get-ChildItem -Path $assetsPath -Name "*.png" | ForEach-Object {
-                Write-Host "  - $_" -ForegroundColor Gray
-            }
-            
-            $iconSizes = @("48x48", "32x32", "64x64", "24x24", "16x16")
-            foreach ($size in $iconSizes) {
-                $iconPath = Join-Path $assetsPath "witticism_$size.png"
-                Write-Host "  Checking for icon: witticism_$size.png - Exists: $(Test-Path $iconPath)" -ForegroundColor Gray
-                if (Test-Path $iconPath) {
-                    $resolvedIconPath = (Resolve-Path $iconPath).Path
-                    Write-Host "   Icon would be set to: $resolvedIconPath" -ForegroundColor Green
-                    $iconSet = $true
-                    break
-                }
-            }
-            
-            if (-not $iconSet) {
-                $mainIconPath = Join-Path $assetsPath "witticism.png"
-                Write-Host "  Checking fallback icon: witticism.png - Exists: $(Test-Path $mainIconPath)" -ForegroundColor Gray
-                if (Test-Path $mainIconPath) {
-                    $resolvedIconPath = (Resolve-Path $mainIconPath).Path
-                    Write-Host "   Fallback icon would be set to: $resolvedIconPath" -ForegroundColor Green
-                    $iconSet = $true
-                }
-            }
-        } else {
-            Write-Host "Assets directory not found!" -ForegroundColor Red
-        }
-    } else {
-        Write-Host "Witticism package not found or not accessible" -ForegroundColor Red
-    }
-    
-    if (-not $iconSet) {
         Write-Host "   Would fallback to Python icon" -ForegroundColor Yellow
     }
     
-    # Test auto-start logic
     Write-Host ""
     Write-Host "=== DRY RUN: Testing Auto-Start Logic ===" -ForegroundColor Cyan
     $startupFolder = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::Startup)
@@ -308,26 +431,20 @@ if ($DryRun) {
     Write-Host "Would create PowerShell script: $startupScript" -ForegroundColor Gray
     Write-Host "Would create VBS wrapper: $vbsScript" -ForegroundColor Gray
     
-    # Show what the auto-start content would be
+    # Show what the auto-start content would be using the same execution info
     Write-Host "PowerShell auto-start content would be:" -ForegroundColor Gray
-    if ($isPipInstall) {
-        Write-Host "  Start-Process -FilePath `"$python312Path`" -ArgumentList `"-m`", `"witticism`" -WindowStyle Hidden" -ForegroundColor Yellow
+    if ($execInfo.Arguments) {
+        $argParts = $execInfo.Arguments.Split(' ')
+        $quotedArgs = $argParts | ForEach-Object { "`"$_`"" }
+        $argString = $quotedArgs -join ', '
+        Write-Host "  Start-Process -FilePath `"$($execInfo.TargetPath)`" -ArgumentList $argString -WindowStyle Hidden" -ForegroundColor Yellow
     } else {
-        $witticismBinDir = & $python312Path -m pipx environment --value PIPX_BIN_DIR 2>$null
-        if ($witticismBinDir) {
-            $witticismExePath = Join-Path $witticismBinDir "witticism.exe"
-            if (Test-Path $witticismExePath) {
-                Write-Host "  Start-Process -FilePath `"$witticismExePath`" -WindowStyle Hidden" -ForegroundColor Yellow  
-            } else {
-                Write-Host "  Start-Process -FilePath `"$python312Path`" -ArgumentList `"-m`", `"pipx`", `"run`", `"witticism`" -WindowStyle Hidden" -ForegroundColor Yellow
-            }
-        } else {
-            Write-Host "  Start-Process -FilePath `"$python312Path`" -ArgumentList `"-m`", `"pipx`", `"run`", `"witticism`" -WindowStyle Hidden" -ForegroundColor Yellow
-        }
+        Write-Host "  Start-Process -FilePath `"$($execInfo.TargetPath)`" -WindowStyle Hidden" -ForegroundColor Yellow
     }
     
     Write-Host ""
     Write-Host "DRY RUN COMPLETE - No changes were made" -ForegroundColor Green
+    Write-Host "NOTE: This dry run uses the EXACT same functions as real installation" -ForegroundColor Cyan
     exit 0
 }
 
@@ -493,18 +610,29 @@ if (-not $SkipAutoStart) {
         $startupFolder = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::Startup)
         $startupScript = Join-Path $startupFolder "WitticismAutoStart.ps1"
         
-        if ($isPipInstall) {
-            # Direct Python execution for pip-installed version
+        # Use the same execution detection logic as desktop shortcut
+        $execInfo = Get-WitticismExecutionInfo -pythonPath $python312Path -isPipInstall $isPipInstall -verbose $true
+        
+        # Generate startup script content
+        if ($execInfo.Arguments) {
+            $argParts = $execInfo.Arguments.Split(' ')
+            $quotedArgs = $argParts | ForEach-Object { "`"$_`"" }
+            $argString = $quotedArgs -join ', '
             $startupContent = @"
 # Witticism Auto-Start Script
-Start-Process -FilePath `"$python312Path`" -ArgumentList `"-m`", `"witticism`" -WindowStyle Hidden
+Start-Process -FilePath `"$($execInfo.TargetPath)`" -ArgumentList $argString -WindowStyle Hidden
 "@
         } else {
-            # pipx execution
             $startupContent = @"
-# Witticism Auto-Start Script  
-Start-Process -FilePath `"$python312Path`" -ArgumentList `"-m`", `"pipx`", `"run`", `"witticism`" -WindowStyle Hidden
+# Witticism Auto-Start Script
+Start-Process -FilePath `"$($execInfo.TargetPath)`" -WindowStyle Hidden
 "@
+        }
+        
+        if ($execInfo.UsesConsole) {
+            Write-Host "   Warning: May show console window during startup" -ForegroundColor Yellow
+        } else {
+            Write-Host "   Auto-start will run silently (no console window)" -ForegroundColor Green
         }
         
         # Write the PowerShell script
@@ -537,175 +665,35 @@ try {
     $WScriptShell = New-Object -ComObject WScript.Shell
     $shortcut = $WScriptShell.CreateShortcut($shortcutPath)
     
-    if ($isPipInstall) {
-        $shortcut.TargetPath = $python312Path
-        $shortcut.Arguments = "-m witticism"
+    # Use the same execution detection logic as auto-start
+    $execInfo = Get-WitticismExecutionInfo -pythonPath $python312Path -isPipInstall $isPipInstall -verbose $true
+    
+    $shortcut.TargetPath = $execInfo.TargetPath
+    $shortcut.Arguments = $execInfo.Arguments
+    
+    if ($execInfo.UsesConsole) {
+        Write-Host "   Desktop shortcut: $($execInfo.Description) (may show console)" -ForegroundColor Yellow
     } else {
-        # For pipx, try to use the direct witticism.exe if available
-        $witticismExe = & $python312Path -m pipx environment --value PIPX_BIN_DIR 2>$null
-        if ($witticismExe) {
-            $witticismExePath = Join-Path $witticismExe "witticism.exe"
-            if (Test-Path $witticismExePath) {
-                $shortcut.TargetPath = $witticismExePath
-                $shortcut.Arguments = ""
-                Write-Host "   Using direct witticism.exe: $witticismExePath" -ForegroundColor Gray
-            } else {
-                # Fallback to python -m pipx run
-                $shortcut.TargetPath = $python312Path
-                $shortcut.Arguments = "-m pipx run witticism"
-                Write-Host "   Using python -m pipx run witticism" -ForegroundColor Gray
-            }
-        } else {
-            # Fallback to python -m pipx run
-            $shortcut.TargetPath = $python312Path
-            $shortcut.Arguments = "-m pipx run witticism"
-        }
+        Write-Host "   Desktop shortcut: $($execInfo.Description)" -ForegroundColor Green
     }
     
     $shortcut.Description = "Witticism - Voice Transcription Assistant (F9 to record)"
     $shortcut.WorkingDirectory = $env:USERPROFILE
     
-    # Try to set a proper Witticism icon
-    $iconSet = $false
+    # Use the same icon detection logic as dry run
+    Write-Host "   Setting shortcut icon..." -ForegroundColor Gray
+    $packageInfo = Get-WitticismPackageInfo -pythonPath $python312Path -isPipInstall $isPipInstall -verbose $true
     
-    # First, try to find the witticism package assets directory
-    try {
-        $witticismPkgPath = $null
-        
-        if ($DryRun) {
-            Write-Host ""
-            Write-Host "=== DRY RUN: Icon Detection ===" -ForegroundColor Cyan
-        }
-        
-        if ($isPipInstall) {
-            # For pip install, look in user site-packages
-            if ($DryRun) {
-                Write-Host "Install type: pip (direct Python package installation)" -ForegroundColor Yellow
-            }
-            $sitePkgPath = & $python312Path -c "import site; print(site.getusersitepackages())" 2>$null
-            if ($DryRun) {
-                Write-Host "User site-packages path: $sitePkgPath" -ForegroundColor Gray
-            }
-            if ($sitePkgPath -and (Test-Path $sitePkgPath)) {
-                $witticismPkgPath = Join-Path $sitePkgPath "witticism"
-                if ($DryRun) {
-                    Write-Host "Expected witticism package path: $witticismPkgPath" -ForegroundColor Gray
-                    Write-Host "Package exists: $(Test-Path $witticismPkgPath)" -ForegroundColor Gray
-                }
-            }
-        } else {
-            # For pipx install, get the actual pipx venv path
-            if ($DryRun) {
-                Write-Host "Install type: pipx (isolated virtual environment)" -ForegroundColor Yellow
-            }
-            $pipxVenvRoot = & $python312Path -m pipx environment --value PIPX_LOCAL_VENVS 2>$null
-            if ($DryRun) {
-                Write-Host "PIPX_LOCAL_VENVS: $pipxVenvRoot" -ForegroundColor Gray
-            }
-            if ($pipxVenvRoot) {
-                $pipxVenvPaths = @(
-                    "$pipxVenvRoot\witticism\Lib\site-packages",
-                    "$pipxVenvRoot\witticism\lib\site-packages"
-                )
-            } else {
-                # Fallback to common Windows pipx paths
-                $pipxVenvPaths = @(
-                    "$env:USERPROFILE\pipx\venvs\witticism\Lib\site-packages",
-                    "$env:LOCALAPPDATA\pipx\venvs\witticism\Lib\site-packages",
-                    "$env:USERPROFILE\.local\pipx\venvs\witticism\lib\site-packages"
-                )
-            }
-            
-            if ($DryRun) {
-                Write-Host "Searching for witticism package in paths:" -ForegroundColor Gray
-                foreach ($path in $pipxVenvPaths) {
-                    Write-Host "  - $path" -ForegroundColor Gray
-                }
-            }
-            
-            foreach ($venvPath in $pipxVenvPaths) {
-                $testWitticismPath = Join-Path $venvPath "witticism"
-                if ($DryRun) {
-                    Write-Host "  Checking: $testWitticismPath - Exists: $(Test-Path $testWitticismPath)" -ForegroundColor Gray
-                }
-                if (Test-Path $testWitticismPath) {
-                    $witticismPkgPath = $testWitticismPath
-                    Write-Host "   Found witticism package at: $witticismPkgPath" -ForegroundColor Gray
-                    break
-                }
-            }
-        }
-        
-        if ($witticismPkgPath -and (Test-Path $witticismPkgPath)) {
-            $assetsPath = Join-Path $witticismPkgPath "assets"
-            if ($DryRun) {
-                Write-Host "Assets path: $assetsPath" -ForegroundColor Gray
-                Write-Host "Assets directory exists: $(Test-Path $assetsPath)" -ForegroundColor Gray
-            }
-            
-            if (Test-Path $assetsPath) {
-                if ($DryRun) {
-                    Write-Host "Available icon files:" -ForegroundColor Gray
-                    Get-ChildItem -Path $assetsPath -Name "*.png" | ForEach-Object {
-                        Write-Host "  - $_" -ForegroundColor Gray
-                    }
-                }
-                
-                # Look for a suitable icon file
-                $iconSizes = @("48x48", "32x32", "64x64", "24x24", "16x16")
-                foreach ($size in $iconSizes) {
-                    $iconPath = Join-Path $assetsPath "witticism_$size.png"
-                    if ($DryRun) {
-                        Write-Host "  Checking for icon: witticism_$size.png - Exists: $(Test-Path $iconPath)" -ForegroundColor Gray
-                    }
-                    if (Test-Path $iconPath) {
-                        # Ensure path is fully resolved and properly formatted
-                        $resolvedIconPath = (Resolve-Path $iconPath).Path
-                        if (-not $DryRun) {
-                            $shortcut.IconLocation = $resolvedIconPath
-                        }
-                        $iconSet = $true
-                        Write-Host "   Using Witticism icon: $resolvedIconPath" -ForegroundColor Gray
-                        if ($DryRun) {
-                            Write-Host "   Icon would be set to: $resolvedIconPath" -ForegroundColor Green
-                        }
-                        break
-                    }
-                }
-                
-                # Fallback to main icon if sized icons not found
-                if (-not $iconSet) {
-                    $mainIconPath = Join-Path $assetsPath "witticism.png"
-                    if ($DryRun) {
-                        Write-Host "  Checking fallback icon: witticism.png - Exists: $(Test-Path $mainIconPath)" -ForegroundColor Gray
-                    }
-                    if (Test-Path $mainIconPath) {
-                        $resolvedIconPath = (Resolve-Path $mainIconPath).Path
-                        if (-not $DryRun) {
-                            $shortcut.IconLocation = $resolvedIconPath
-                        }
-                        $iconSet = $true
-                        Write-Host "   Using Witticism icon: $resolvedIconPath" -ForegroundColor Gray
-                        if ($DryRun) {
-                            Write-Host "   Fallback icon would be set to: $resolvedIconPath" -ForegroundColor Green
-                        }
-                    }
-                }
-            }
-        } else {
-            if ($DryRun) {
-                Write-Host "Witticism package not found or not accessible" -ForegroundColor Red
-            }
-        }
-    } catch {
-        # Silently continue if icon detection fails
-    }
-    
-    # Fallback to Python icon if Witticism icon not found
-    if (-not $iconSet) {
+    if ($packageInfo.IconSet) {
+        $shortcut.IconLocation = $packageInfo.IconPath
+        Write-Host "   [OK] Desktop shortcut icon set to Witticism icon" -ForegroundColor Green
+    } else {
+        # Fallback to Python icon if Witticism icon not found
         if (Test-Path "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe") {
             $shortcut.IconLocation = "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe,0"
-            Write-Host "   Using Python icon (Witticism icon not found)" -ForegroundColor Gray
+            Write-Host "   Using Python icon (Witticism icon not found)" -ForegroundColor Yellow
+        } else {
+            Write-Host "   No custom icon set (using default)" -ForegroundColor Gray
         }
     }
     
@@ -728,9 +716,9 @@ Write-Host "   (This may take 30-60 seconds on first run - downloading AI models
 
 try {
     $testCmd = if ($isPipInstall) { 
-        "& '$python312Path' -m witticism --version"
+        "'$python312Path' -m witticism --version"
     } else { 
-        "& '$python312Path' -m pipx run witticism --version" 
+        "'$python312Path' -m pipx run witticism --version" 
     }
     
     Write-Host "   Running: witticism --version..." -ForegroundColor Gray
