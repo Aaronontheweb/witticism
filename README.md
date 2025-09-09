@@ -39,7 +39,7 @@ curl -sSL https://raw.githubusercontent.com/Aaronontheweb/witticism/master/insta
 
 **Windows:**
 ```powershell
-irm https://raw.githubusercontent.com/Aaronontheweb/witticism/windows-support/install.ps1 | iex
+irm https://raw.githubusercontent.com/Aaronontheweb/witticism/master/install.ps1 | iex
 ```
 
 > For detailed Windows installation instructions, see [INSTALL_WINDOWS.md](INSTALL_WINDOWS.md)
