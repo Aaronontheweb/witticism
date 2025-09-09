@@ -317,6 +317,7 @@ if pipx list | grep -q "package witticism"; then
     echo "  Current version: $CURRENT_VERSION"
     
     # Check PyTorch version in the pipx environment
+    echo "  Checking PyTorch compatibility (this may take a moment)..."
     PYTORCH_CHECK=$(pipx run --spec witticism python -c "import torch; print(torch.__version__)" 2>/dev/null || echo "")
     if [ -n "$PYTORCH_CHECK" ]; then
         PYTORCH_VERSION="$PYTORCH_CHECK"
@@ -354,6 +355,7 @@ except:
     if [ "$LATEST_VERSION" != "unknown" ] && [ "$LATEST_VERSION" != "$CURRENT_VERSION" ]; then
         echo "  📦 New version available: $LATEST_VERSION"
         echo "🔄 Upgrading Witticism (preserving compatible PyTorch)..."
+        echo "⏳ This may take several minutes depending on what needs updating..."
         pipx upgrade witticism --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple"
     elif [ "$NEEDS_REINSTALL" = true ]; then
         echo "🔄 Reinstalling due to PyTorch compatibility..."
