@@ -30,13 +30,19 @@ Built to solve real GPU acceleration issues with whisper.cpp. WhisperX provides:
 
 ## Installation
 
-### 🚀 Quick Install (Recommended)
+### 🚀 Quick Install
 
-**Just run this one command:**
-
+**Linux:**
 ```bash
 curl -sSL https://raw.githubusercontent.com/Aaronontheweb/witticism/master/install.sh | bash
 ```
+
+**Windows:**
+```powershell
+irm https://raw.githubusercontent.com/Aaronontheweb/witticism/windows-support/install.ps1 | iex
+```
+
+> For detailed Windows installation instructions, see [INSTALL_WINDOWS.md](INSTALL_WINDOWS.md)
 
 **That's it!** The installer will:
 - ✅ Install system dependencies automatically (asks for sudo only if needed)
