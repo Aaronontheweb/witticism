@@ -229,9 +229,8 @@ class WindowsPowerEventSleepMonitor(SleepMonitor):
             # Simple approach: Poll power status changes using PowerShell
             import subprocess
             import time
-            
+
             logger.debug("[SLEEP_MONITOR] WINDOWS_MONITOR: starting PowerShell power event monitoring")
-            
             # Poll power status changes
             prev_power_status = self._get_power_status()
             while not self._stop_event.is_set():
