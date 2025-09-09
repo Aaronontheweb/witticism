@@ -47,7 +47,6 @@ def ensure_single_instance():
     try:
         # Try to create and lock the file
         lock_file = open(lock_file_path, 'w')
-        
         # Use platform-specific locking
         if platform.system().lower() == 'windows':
             # Windows file locking using msvcrt

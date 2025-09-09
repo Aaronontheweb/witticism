@@ -174,7 +174,7 @@ class DependencyValidator:
             try:
                 # Test if we can access Win32 API for power management
                 import subprocess
-                result = subprocess.run(['powershell', '-Command', 'Get-WmiObject', '-Class', 'Win32_PowerPlan'], 
+                result = subprocess.run(['powershell', '-Command', 'Get-WmiObject', '-Class', 'Win32_PowerPlan'],
                                       capture_output=True, timeout=5, text=True)
                 if result.returncode == 0:
                     results.append(DependencyResult(
