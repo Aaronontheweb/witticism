@@ -212,6 +212,13 @@ try {
 # Install witticism with Python 3.12 compatibility focus
 Write-Host "Installing Witticism..." -ForegroundColor Blue
 
+# Check for specific version via environment variable
+$witticismPackage = "witticism"
+if ($env:WITTICISM_VERSION) {
+    $witticismPackage = "witticism==$env:WITTICISM_VERSION"
+    Write-Host "   Installing specific version: $env:WITTICISM_VERSION" -ForegroundColor Blue
+}
+
 # Force CPU-only PyTorch for Python 3.12 compatibility
 $indexUrl = "https://download.pytorch.org/whl/cpu"
 $pipArgs = @("--pip-args=--index-url $indexUrl --extra-index-url https://pypi.org/simple")
@@ -221,13 +228,13 @@ Write-Host "   (This ensures maximum compatibility with WhisperX)" -ForegroundCo
 
 try {
     # Use our Python 3.12 path explicitly
-    & $python312Path -m pipx install witticism $pipArgs
+    & $python312Path -m pipx install $witticismPackage $pipArgs
     
     if ($LASTEXITCODE -ne 0) {
         Write-Host "WARNING: Standard installation failed, trying alternative method..." -ForegroundColor Yellow
         
         # Alternative: Use pip directly in user space
-        & $python312Path -m pip install --user witticism --index-url $indexUrl --extra-index-url https://pypi.org/simple
+        & $python312Path -m pip install --user $witticismPackage --index-url $indexUrl --extra-index-url https://pypi.org/simple
         
         if ($LASTEXITCODE -ne 0) {
             throw "Both pipx and pip installation methods failed"
