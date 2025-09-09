@@ -91,7 +91,10 @@ else
 fi
 
 # 2. Detect GPU and install with right CUDA
-if nvidia-smi &> /dev/null; then
+if [ "$WITTICISM_CPU_ONLY" = "1" ]; then
+    echo "💻 CPU-only mode forced via environment variable"
+    INDEX_URL="https://download.pytorch.org/whl/cpu"
+elif nvidia-smi &> /dev/null; then
     CUDA_VERSION=$(nvidia-smi | grep "CUDA Version" | sed 's/.*CUDA Version: \([0-9]*\.[0-9]*\).*/\1/')
     echo "🎮 GPU detected with CUDA $CUDA_VERSION"
     
@@ -341,10 +344,11 @@ if command -v gtk-update-icon-cache &> /dev/null; then
     gtk-update-icon-cache "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
 fi
 
-# 5. Set up desktop entry for launcher
-echo "🚀 Creating desktop launcher entry..."
-desktop_dir="$HOME/.local/share/applications"
-mkdir -p "$desktop_dir"
+# 5. Set up desktop entry for launcher (skip in CI)
+if [ "$WITTICISM_NO_DESKTOP" != "1" ]; then
+    echo "🚀 Creating desktop launcher entry..."
+    desktop_dir="$HOME/.local/share/applications"
+    mkdir -p "$desktop_dir"
 
 # Find witticism executable
 if command -v witticism &> /dev/null; then
@@ -380,11 +384,14 @@ if command -v gtk-update-icon-cache &> /dev/null; then
     gtk-update-icon-cache "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
 fi
 
-# 6. Set up auto-start
-echo "⚙️  Setting up auto-start..."
-mkdir -p ~/.config/autostart
+fi
 
-cat > ~/.config/autostart/witticism.desktop << EOF
+# 6. Set up auto-start (skip in CI)
+if [ "$WITTICISM_NO_DESKTOP" != "1" ]; then
+    echo "⚙️  Setting up auto-start..."
+    mkdir -p ~/.config/autostart
+
+    cat > ~/.config/autostart/witticism.desktop << EOF
 [Desktop Entry]
 Type=Application
 Name=Witticism
@@ -395,15 +402,21 @@ StartupNotify=false
 Terminal=false
 X-GNOME-Autostart-enabled=true
 EOF
+fi
 
 echo "✅ Installation complete!"
 echo ""
-echo "Witticism will:"
-echo "  • Appear in your application launcher"
-echo "  • Start automatically when you log in"
-echo "  • Run in your system tray"
-echo "  • Use GPU acceleration (if available)"
-echo ""
-echo "To start now: witticism"
-echo "To start from launcher: Look for 'Witticism' in your apps menu"
-echo "To disable auto-start: rm ~/.config/autostart/witticism.desktop"
+if [ "$WITTICISM_NO_DESKTOP" != "1" ]; then
+    echo "Witticism will:"
+    echo "  • Appear in your application launcher"
+    echo "  • Start automatically when you log in"
+    echo "  • Run in your system tray"
+    echo "  • Use GPU acceleration (if available)"
+    echo ""
+    echo "To start now: witticism"
+    echo "To start from launcher: Look for 'Witticism' in your apps menu"
+    echo "To disable auto-start: rm ~/.config/autostart/witticism.desktop"
+else
+    echo "Witticism installed successfully (desktop integration skipped for CI)."
+    echo "To start: witticism"
+fi

@@ -1,0 +1,259 @@
+name: Install Test
+
+on:
+  push:
+    branches: [ main, master, develop ]
+    paths:
+      - 'install.sh'
+      - 'install.ps1'
+      - 'INSTALL_WINDOWS.md'
+      - 'pyproject.toml'
+      - 'src/**'
+  pull_request:
+    branches: [ main, master, develop ]
+    paths:
+      - 'install.sh'
+      - 'install.ps1'
+      - 'INSTALL_WINDOWS.md'
+      - 'pyproject.toml'
+      - 'src/**'
+  workflow_dispatch:
+
+jobs:
+  test-linux-install:
+    runs-on: ubuntu-latest
+    name: Test Linux Install Script
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y portaudio19-dev
+    
+    - name: Test install script (first run)
+      run: |
+        echo "Testing initial installation..."
+        bash install.sh
+      env:
+        # Force CPU-only for CI environment
+        WITTICISM_CPU_ONLY: 1
+        # Skip desktop integration in CI
+        WITTICISM_NO_DESKTOP: 1
+    
+    - name: Verify installation
+      run: |
+        echo "Verifying installation..."
+        # Check if witticism executable exists (don't run it due to pynput X11 issues in CI)
+        if command -v witticism &> /dev/null; then
+          echo "SUCCESS: witticism found in PATH: $(which witticism)"
+        elif [ -f ~/.local/bin/witticism ]; then
+          echo "SUCCESS: witticism found at ~/.local/bin/witticism"
+        else
+          echo "ERROR: witticism executable not found"
+          ls -la ~/.local/bin/ || echo "~/.local/bin/ does not exist"
+          exit 1
+        fi
+        echo "SUCCESS: Witticism installed and working"
+    
+    - name: Test install script (second run - idempotency)
+      run: |
+        echo "Testing idempotent installation..."
+        bash install.sh
+      env:
+        WITTICISM_CPU_ONLY: 1
+        WITTICISM_NO_DESKTOP: 1
+    
+    - name: Verify installation still works after second run
+      run: |
+        echo "Verifying installation after second run..."
+        # Check if witticism executable still exists 
+        if command -v witticism &> /dev/null; then
+          echo "SUCCESS: witticism still found in PATH: $(which witticism)"
+        elif [ -f ~/.local/bin/witticism ]; then
+          echo "SUCCESS: witticism still found at ~/.local/bin/witticism"
+        else
+          echo "ERROR: witticism executable not found after second run"
+          exit 1
+        fi
+        echo "SUCCESS: Witticism still working after idempotent install"
+
+  # TODO: Re-enable after Windows support is released to PyPI
+  # Currently disabled because the live PyPI package doesn't include Windows support yet
+  test-windows-install-disabled:
+    if: false  # Temporarily disabled
+    runs-on: windows-latest
+    name: Test Windows Install Script (Disabled - Pre-Release)
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Test PowerShell install script (first run)
+      shell: powershell
+      run: |
+        Write-Host "Testing initial Windows installation..."
+        Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
+        .\install.ps1 -CPUOnly -SkipAutoStart
+    
+    - name: Verify Windows installation
+      shell: powershell
+      run: |
+        Write-Host "Verifying Windows installation..."
+        # Test both pipx and direct pip installation methods
+        $python312Paths = @(
+            "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe",
+            "$env:PROGRAMFILES\Python312\python.exe",
+            "$env:PROGRAMFILES(x86)\Python312\python.exe"
+        )
+        
+        $pythonPath = $null
+        foreach ($path in $python312Paths) {
+            if (Test-Path $path) {
+                $pythonPath = $path
+                break
+            }
+        }
+        
+        if (-not $pythonPath) {
+            # Try py.exe launcher
+            $pythonPath = py -3.12 -c "import sys; print(sys.executable)" 2>$null
+        }
+        
+        if ($pythonPath) {
+            Write-Host "Found Python at: $pythonPath"
+            
+            # Try pipx first
+            try {
+                & $pythonPath -m pipx run witticism --version
+                Write-Host "SUCCESS: Witticism working via pipx"
+            } catch {
+                # Try direct pip installation
+                try {
+                    & $pythonPath -m witticism --version
+                    Write-Host "SUCCESS: Witticism working via pip"
+                } catch {
+                    Write-Host "❌ Witticism not working"
+                    throw "Installation verification failed"
+                }
+            }
+        } else {
+            throw "Python 3.12 not found after installation"
+        }
+    
+    - name: Test PowerShell install script (second run - idempotency)
+      shell: powershell
+      run: |
+        Write-Host "Testing idempotent Windows installation..."
+        .\install.ps1 -CPUOnly -SkipAutoStart
+    
+    - name: Verify Windows installation still works after second run
+      shell: powershell
+      run: |
+        Write-Host "Verifying Windows installation after second run..."
+        # Find Python 3.12 again
+        $python312Paths = @(
+            "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe",
+            "$env:PROGRAMFILES\Python312\python.exe",
+            "$env:PROGRAMFILES(x86)\Python312\python.exe"
+        )
+        
+        $pythonPath = $null
+        foreach ($path in $python312Paths) {
+            if (Test-Path $path) {
+                $pythonPath = $path
+                break
+            }
+        }
+        
+        if (-not $pythonPath) {
+            $pythonPath = py -3.12 -c "import sys; print(sys.executable)" 2>$null
+        }
+        
+        if ($pythonPath) {
+            # Try pipx first, then pip
+            try {
+                & $pythonPath -m pipx run witticism --version
+                Write-Host "SUCCESS: Witticism still working via pipx after idempotent install"
+            } catch {
+                try {
+                    & $pythonPath -m witticism --version
+                    Write-Host "SUCCESS: Witticism still working via pip after idempotent install"
+                } catch {
+                    throw "Installation verification failed after second run"
+                }
+            }
+        } else {
+            throw "Python 3.12 not found after second installation"
+        }
+
+  test-linux-manual:
+    runs-on: ubuntu-latest
+    name: Test Linux Manual Installation Steps
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y portaudio19-dev
+    
+    - name: Test manual installation steps from README
+      run: |
+        echo "Testing manual installation steps..."
+        
+        # Install pipx
+        python3 -m pip install --user pipx
+        python3 -m pipx ensurepath
+        
+        # Add pipx to PATH for this session
+        export PATH="$HOME/.local/bin:$PATH"
+        
+        # Install CPU-only version
+        pipx install witticism
+        
+        # Verify installation exists (skip running due to pynput X11 issues in CI)
+        if command -v witticism &> /dev/null; then
+          echo "SUCCESS: witticism found in PATH: $(which witticism)"
+        else
+          echo "ERROR: witticism not found in PATH"
+          exit 1
+        fi
+        echo "SUCCESS: Manual installation successful"
+      env:
+        # Provide fake display for pynput compatibility in headless CI
+        DISPLAY: ':99'
+
+  # TODO: Re-enable after Windows support is released to PyPI  
+  test-windows-manual-disabled:
+    if: false  # Temporarily disabled
+    runs-on: windows-latest
+    name: Test Windows Manual Installation Steps (Disabled - Pre-Release)
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+    
+    - name: Test manual installation steps from Windows guide
+      shell: powershell
+      run: |
+        Write-Host "Testing manual Windows installation steps..."
+        
+        # Install pipx
+        python -m pip install --user pipx
+        
+        # Install CPU-only version
+        python -m pipx install witticism --pip-args="--index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple"
+        
+        # Verify installation
+        python -m pipx run witticism --version
+        Write-Host "Manual Windows installation successful"

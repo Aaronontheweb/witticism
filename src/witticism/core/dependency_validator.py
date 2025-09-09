@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Dict, Any
 from enum import Enum
 import logging
+import os
 import platform
 import subprocess
 import sys
@@ -34,7 +35,7 @@ class DependencyResult:
     platform_required: Optional[str] = None  # e.g., "linux", "windows", "darwin"
 
     def __str__(self):
-        status = "✓" if self.available else "✗"
+        status = "[OK]" if self.available else "[FAIL]"
         version_info = f" (v{self.version})" if self.version else ""
         platform_info = f" [{self.platform_required}]" if self.platform_required else ""
         return f"{status} {self.name}{version_info}{platform_info}"
@@ -46,6 +47,20 @@ class DependencyValidator:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
         self.current_platform = platform.system().lower()
+
+    def _is_headless_environment(self) -> bool:
+        """Detect if we're running in a headless/display-less environment"""
+        # Most reliable for CI environments
+        return (
+            not os.environ.get('DISPLAY') and
+            os.environ.get('CI') == 'true'
+        ) or (
+            # GitHub Actions specific
+            os.environ.get('GITHUB_ACTIONS') == 'true'
+        ) or (
+            # General headless indicators
+            os.environ.get('HEADLESS') == 'true'
+        )
 
     def validate_all(self) -> List[DependencyResult]:
         """Validate all dependencies and return results"""
@@ -169,6 +184,32 @@ class DependencyValidator:
                 ))
                 self.logger.warning(f"[DEPENDENCY_VALIDATOR] PLATFORM_ERROR: DBus connection failed - {e}")
 
+        elif self.current_platform == "windows":
+            # Check for Windows-specific sleep monitoring capabilities
+            try:
+                # Test if we can access Win32 API for power management
+                import subprocess
+                result = subprocess.run(['powershell', '-Command', 'Get-WmiObject', '-Class', 'Win32_PowerPlan'],
+                                      capture_output=True, timeout=5, text=True)
+                if result.returncode == 0:
+                    results.append(DependencyResult(
+                        "windows_power_management", True, None, None,
+                        DependencyType.PLATFORM_SPECIFIC, "windows"
+                    ))
+                    self.logger.debug("[DEPENDENCY_VALIDATOR] PLATFORM_OK: Windows power management accessible")
+                else:
+                    results.append(DependencyResult(
+                        "windows_power_management", False, None, "PowerShell/WMI not accessible",
+                        DependencyType.PLATFORM_SPECIFIC, "windows"
+                    ))
+                    self.logger.warning("[DEPENDENCY_VALIDATOR] PLATFORM_WARNING: Windows power management not accessible")
+            except Exception as e:
+                results.append(DependencyResult(
+                    "windows_power_management", False, None, str(e),
+                    DependencyType.PLATFORM_SPECIFIC, "windows"
+                ))
+                self.logger.warning(f"[DEPENDENCY_VALIDATOR] PLATFORM_ERROR: Windows power management check failed - {e}")
+
         # Check for CUDA availability (optional but important for performance)
         try:
             import torch
@@ -279,14 +320,14 @@ class DependencyValidator:
 
         missing_req = self.get_missing_required(results)
         if missing_req:
-            print(f"\n❌ MISSING REQUIRED DEPENDENCIES ({len(missing_req)}):")
+            print(f"\n[ERROR] MISSING REQUIRED DEPENDENCIES ({len(missing_req)}):")
             for dep in missing_req:
                 print(f"   {dep}")
                 print(f"      Error: {dep.error_message}")
 
         missing_opt = self.get_missing_optional(results)
         if missing_opt:
-            print(f"\n⚠️  MISSING OPTIONAL DEPENDENCIES ({len(missing_opt)}):")
+            print(f"\n[WARNING] MISSING OPTIONAL DEPENDENCIES ({len(missing_opt)}):")
             for dep in missing_opt:
                 print(f"   {dep}")
                 if dep.error_message:
@@ -294,14 +335,14 @@ class DependencyValidator:
 
         available = [r for r in results if r.available]
         if available:
-            print(f"\n✅ AVAILABLE DEPENDENCIES ({len(available)}):")
+            print(f"\n[SUCCESS] AVAILABLE DEPENDENCIES ({len(available)}):")
             for dep in available[:10]:  # Show first 10 to avoid spam
                 print(f"   {dep}")
             if len(available) > 10:
                 print(f"   ... and {len(available) - 10} more")
 
         if summary['success']:
-            print("\n🎉 All required dependencies are available!")
+            print("\n[SUCCESS] All required dependencies are available!")
         else:
-            print(f"\n💥 {len(missing_req)} required dependencies missing - application may not start")
+            print(f"\n[ERROR] {len(missing_req)} required dependencies missing - application may not start")
 

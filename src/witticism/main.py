@@ -4,25 +4,48 @@ import sys
 import signal
 import logging
 import argparse
-import fcntl
 import os
+import platform
 from pathlib import Path
-try:
-    from PyQt5.QtWidgets import QApplication, QMessageBox
-    from PyQt5.QtCore import Qt
-except ImportError:
-    # Try alternative import
-    from PyQt5 import QtWidgets as QtW
-    from PyQt5 import QtCore
-    QApplication = QtW.QApplication
-    QMessageBox = QtW.QMessageBox
-    Qt = QtCore.Qt
 
-from witticism.core.whisperx_engine import WhisperXEngine
-from witticism.core.audio_capture import PushToTalkCapture
-from witticism.core.hotkey_manager import HotkeyManager
-from witticism.core.transcription_pipeline import TranscriptionPipeline
-from witticism.ui.system_tray import SystemTrayApp
+def _is_headless_environment():
+    """Detect if we're running in a headless/display-less environment"""
+    return (
+        not os.environ.get('DISPLAY') and
+        os.environ.get('CI') == 'true'
+    ) or (
+        os.environ.get('GITHUB_ACTIONS') == 'true'
+    ) or (
+        os.environ.get('HEADLESS') == 'true'
+    ) or (
+        '--version' in sys.argv
+    )
+
+# Skip display-dependent imports in headless environments
+if not _is_headless_environment():
+    try:
+        from PyQt5.QtWidgets import QApplication, QMessageBox
+        from PyQt5.QtCore import Qt
+    except ImportError:
+        # Try alternative import
+        from PyQt5 import QtWidgets as QtW
+        from PyQt5 import QtCore
+        QApplication = QtW.QApplication
+        QMessageBox = QtW.QMessageBox
+        Qt = QtCore.Qt
+
+    # These imports may require display access (pynput, PyQt5, audio)
+    from witticism.core.whisperx_engine import WhisperXEngine
+    from witticism.core.audio_capture import PushToTalkCapture
+    from witticism.core.hotkey_manager import HotkeyManager
+    from witticism.core.transcription_pipeline import TranscriptionPipeline
+    from witticism.ui.system_tray import SystemTrayApp
+else:
+    # Headless mode - set to None to avoid undefined variables
+    QApplication = None
+    QMessageBox = None
+    Qt = None
+
 from witticism.utils.output_manager import OutputManager
 from witticism.utils.config_manager import ConfigManager
 from witticism.utils.logging_config import setup_logging
@@ -32,17 +55,38 @@ logger = logging.getLogger(__name__)
 
 
 def ensure_single_instance():
-    """Ensure only one instance of Witticism is running with zombie cleanup.
+    """Ensure only one instance of Witticism is running with cross-platform support.
 
     Returns:
         file object: Lock file handle to keep alive, or None if another instance is running
     """
-    lock_file_path = '/tmp/witticism.lock'  # nosec B108
+    # Use platform-appropriate temp directory
+    if platform.system().lower() == 'windows':
+        import tempfile
+        lock_file_path = os.path.join(tempfile.gettempdir(), 'witticism.lock')
+    else:
+        lock_file_path = '/tmp/witticism.lock'  # nosec B108
 
     try:
         # Try to create and lock the file
         lock_file = open(lock_file_path, 'w')
-        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        # Use platform-specific locking
+        if platform.system().lower() == 'windows':
+            # Windows file locking using msvcrt
+            try:
+                import msvcrt
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+            except ImportError:
+                # msvcrt not available, use simple file existence check
+                pass
+            except OSError:
+                # File already locked
+                lock_file.close()
+                raise IOError("Another instance is running")
+        else:
+            # Unix file locking using fcntl
+            import fcntl
+            fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
         # Write PID to lock file for debugging
         lock_file.write(str(os.getpid()))
@@ -66,12 +110,13 @@ def ensure_single_instance():
                         os.kill(old_pid, 0)  # Signal 0 just tests if process exists
                         # Process exists - show user message
                         logger.error(f"[WITTICISM] INSTANCE_RUNNING: another Witticism instance is running (PID {old_pid})")
-                        QMessageBox.information(
-                            None,
-                            "Witticism Already Running",
-                            f"Another instance of Witticism is already running (PID {old_pid}).\n\n"
-                            "Check your system tray or use 'ps aux | grep witticism' to find it."
-                        )
+                        if QMessageBox is not None:
+                            QMessageBox.information(
+                                None,
+                                "Witticism Already Running",
+                                f"Another instance of Witticism is already running (PID {old_pid}).\n\n"
+                                "Check your system tray or use 'ps aux | grep witticism' to find it."
+                            )
                         return None
 
                     except OSError:
@@ -287,10 +332,12 @@ class WitticismApp:
         app.setQuitOnLastWindowClosed(False)
 
         # Check system tray availability
-        from PyQt5.QtWidgets import QSystemTrayIcon
-        if not QSystemTrayIcon.isSystemTrayAvailable():
-            QMessageBox.critical(None, "System Tray", "System tray is not available on this system.")
-            sys.exit(1)
+        if not _is_headless_environment():
+            from PyQt5.QtWidgets import QSystemTrayIcon
+            if not QSystemTrayIcon.isSystemTrayAvailable():
+                if QMessageBox is not None:
+                    QMessageBox.critical(None, "System Tray", "System tray is not available on this system.")
+                sys.exit(1)
 
         # Initialize components with graceful CUDA fallback
         try:
@@ -344,8 +391,9 @@ class WitticismApp:
                             8000
                         )
 
-                    QMessageBox.critical(None, "Initialization Error",
-                                       f"Failed to initialize even with CPU fallback:\n{str(retry_error)}")
+                    if QMessageBox is not None:
+                        QMessageBox.critical(None, "Initialization Error",
+                                           f"Failed to initialize even with CPU fallback:\n{str(retry_error)}")
                     sys.exit(1)
             else:
                 # Non-CUDA errors are still fatal
@@ -358,7 +406,8 @@ class WitticismApp:
                         8000
                     )
 
-                QMessageBox.critical(None, "Initialization Error", f"Failed to initialize: {error_msg}")
+                if QMessageBox is not None:
+                    QMessageBox.critical(None, "Initialization Error", f"Failed to initialize: {error_msg}")
                 sys.exit(1)
 
         # System tray already created early during initialization
