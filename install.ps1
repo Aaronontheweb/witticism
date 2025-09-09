@@ -202,7 +202,7 @@ try {
     
     foreach ($path in $pipxPaths) {
         if (Test-Path $path -PathType Container) {
-            $env:PATH += ";$path"
+            $env:PATH = $env:PATH + ";$path"
         }
     }
     
