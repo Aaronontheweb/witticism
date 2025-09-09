@@ -198,6 +198,98 @@ class MockSleepMonitor(SleepMonitor):
             self.on_resume()
 
 
+class WindowsPowerEventSleepMonitor(SleepMonitor):
+    """Windows sleep monitoring using PowerShell event monitoring"""
+    
+    def __init__(self, on_suspend: Callable[[], None], on_resume: Callable[[], None]):
+        super().__init__(on_suspend, on_resume)
+        self._monitoring = False
+        self._monitor_thread = None
+        self._stop_event = None
+        
+    def start_monitoring(self) -> None:
+        if not self._monitoring:
+            import threading
+            self._stop_event = threading.Event()
+            self._monitor_thread = threading.Thread(target=self._monitor_power_events, daemon=True)
+            self._monitor_thread.start()
+            self._monitoring = True
+            logger.info("[SLEEP_MONITOR] STARTED: Windows power event monitoring active")
+            
+    def stop_monitoring(self) -> None:
+        if self._monitoring:
+            if self._stop_event:
+                self._stop_event.set()
+            if self._monitor_thread and self._monitor_thread.is_alive():
+                self._monitor_thread.join(timeout=2.0)
+            self._monitoring = False
+            logger.info("[SLEEP_MONITOR] STOPPED: Windows power event monitoring deactivated")
+            
+    def is_monitoring(self) -> bool:
+        return self._monitoring
+        
+    def _monitor_power_events(self):
+        """Monitor Windows power events using PowerShell"""
+        try:
+            # PowerShell script to monitor power events
+            powershell_script = '''
+            Register-WmiEvent -Query "SELECT * FROM Win32_PowerManagementEvent" -Action {
+                $Event = $Event.SourceEventArgs.NewEvent
+                Write-Host "POWER_EVENT:$($Event.EventType):$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+            }
+            
+            # Keep running until interrupted
+            while ($true) {
+                Start-Sleep -Seconds 1
+                if ([Console]::KeyAvailable) { break }
+            }
+            '''
+            
+            import subprocess
+            import time
+            
+            logger.debug("[SLEEP_MONITOR] WINDOWS_MONITOR: starting PowerShell power event monitoring")
+            
+            # Alternative approach: Poll power status changes
+            prev_power_status = self._get_power_status()
+            
+            while not self._stop_event.is_set():
+                try:
+                    current_power_status = self._get_power_status()
+                    
+                    # Simple heuristic: if we can't get power status, system might be suspending
+                    if prev_power_status is not None and current_power_status is None:
+                        logger.info("[SLEEP_MONITOR] SUSPEND_DETECTED: Windows power status unavailable - likely suspending")
+                        self.on_suspend()
+                    elif prev_power_status is None and current_power_status is not None:
+                        logger.info("[SLEEP_MONITOR] RESUME_DETECTED: Windows power status restored - likely resumed")
+                        self.on_resume()
+                        
+                    prev_power_status = current_power_status
+                    
+                except Exception as e:
+                    logger.warning(f"[SLEEP_MONITOR] WINDOWS_ERROR: power monitoring error - {e}")
+                
+                # Poll every 5 seconds
+                self._stop_event.wait(5.0)
+                
+        except Exception as e:
+            logger.error(f"[SLEEP_MONITOR] WINDOWS_INIT_ERROR: failed to start power monitoring - {e}")
+            
+    def _get_power_status(self) -> bool:
+        """Get current power status using PowerShell - returns None if unavailable"""
+        try:
+            import subprocess
+            result = subprocess.run([
+                'powershell', '-Command', 
+                'Get-WmiObject -Class Win32_Battery | Select-Object -First 1 | Select-Object -ExpandProperty BatteryStatus'
+            ], capture_output=True, timeout=3, text=True)
+            
+            return result.returncode == 0 and result.stdout.strip()
+        except Exception:
+            return None
+
+
 def create_sleep_monitor(on_suspend: Callable[[], None], on_resume: Callable[[], None]) -> SleepMonitor:
     """Factory to create appropriate sleep monitor for the current platform"""
 
@@ -224,8 +316,11 @@ def create_sleep_monitor(on_suspend: Callable[[], None], on_resume: Callable[[],
         # TODO: Implement MacOS monitoring
         logger.warning("[SLEEP_MONITOR] FACTORY: MacOS sleep monitoring not yet implemented")
     elif system == "windows":
-        # TODO: Implement Windows monitoring
-        logger.warning("[SLEEP_MONITOR] FACTORY: Windows sleep monitoring not yet implemented")
+        try:
+            logger.info("[SLEEP_MONITOR] FACTORY: creating Windows power event monitor")
+            return WindowsPowerEventSleepMonitor(on_suspend, on_resume)
+        except Exception as e:
+            logger.warning(f"[SLEEP_MONITOR] FACTORY: Windows sleep monitoring failed to initialize - {e}")
     else:
         logger.warning(f"[SLEEP_MONITOR] FACTORY: sleep monitoring not supported on {system}")
 

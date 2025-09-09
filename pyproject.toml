@@ -7,7 +7,7 @@ name = "witticism"
 dynamic = ["version"]
 description = "WhisperX-powered global transcription and push-to-talk application"
 readme = "README.md"
-requires-python = ">=3.9,<3.13"
+requires-python = ">=3.9,<3.14"
 authors = [
     {name = "Aaron Stannard", email = "aaron@petabridge.com"}
 ]
@@ -21,12 +21,13 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Multimedia :: Sound/Audio :: Speech",
 ]
 dependencies = [
     "whisperx>=3.1.0",
-    "torch>=2.0.0,<2.4.0",  # Cap at 2.4 for GTX 10xx GPU compatibility
-    "torchaudio>=2.0.0,<2.4.0",
+    "torch>=2.0.0",  # Allow newer versions for Python 3.13 compatibility
+    "torchaudio>=2.0.0",
     "PyQt5>=5.15.0",
     "pyaudio>=0.2.11",
     "pynput>=1.7.0",
@@ -34,7 +35,7 @@ dependencies = [
     "numpy>=1.20.0",
     "pyperclip>=1.8.0",
     "platformdirs>=3.0.0",
-    "pydbus>=0.6.0",
+    "pydbus>=0.6.0; sys_platform == 'linux'",  # Linux only for sleep monitoring
 ]
 
 

@@ -4,8 +4,8 @@ import sys
 import signal
 import logging
 import argparse
-import fcntl
 import os
+import platform
 from pathlib import Path
 try:
     from PyQt5.QtWidgets import QApplication, QMessageBox
@@ -32,17 +32,39 @@ logger = logging.getLogger(__name__)
 
 
 def ensure_single_instance():
-    """Ensure only one instance of Witticism is running with zombie cleanup.
+    """Ensure only one instance of Witticism is running with cross-platform support.
 
     Returns:
         file object: Lock file handle to keep alive, or None if another instance is running
     """
-    lock_file_path = '/tmp/witticism.lock'  # nosec B108
+    # Use platform-appropriate temp directory
+    if platform.system().lower() == 'windows':
+        import tempfile
+        lock_file_path = os.path.join(tempfile.gettempdir(), 'witticism.lock')
+    else:
+        lock_file_path = '/tmp/witticism.lock'  # nosec B108
 
     try:
         # Try to create and lock the file
         lock_file = open(lock_file_path, 'w')
-        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        
+        # Use platform-specific locking
+        if platform.system().lower() == 'windows':
+            # Windows file locking using msvcrt
+            try:
+                import msvcrt
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+            except ImportError:
+                # msvcrt not available, use simple file existence check
+                pass
+            except OSError:
+                # File already locked
+                lock_file.close()
+                raise IOError("Another instance is running")
+        else:
+            # Unix file locking using fcntl
+            import fcntl
+            fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
         # Write PID to lock file for debugging
         lock_file.write(str(os.getpid()))
