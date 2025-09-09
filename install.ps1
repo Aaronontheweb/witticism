@@ -554,6 +554,12 @@ $witticismPackage = if ($Version) {
 $indexUrl = "https://download.pytorch.org/whl/cpu"
 $pipArgs = @("--pip-args=--index-url $indexUrl --extra-index-url https://pypi.org/simple")
 
+# Add --force flag if ForceReinstall is specified
+if ($ForceReinstall) {
+    $pipArgs += "--force"
+    Write-Host "   Using --force to override existing installation" -ForegroundColor Yellow
+}
+
 Write-Host "   Installing with Python 3.12 and CPU-optimized PyTorch..." -ForegroundColor Blue
 Write-Host "   (This ensures maximum compatibility with WhisperX)" -ForegroundColor Gray
 Write-Host ""
@@ -715,16 +721,20 @@ Write-Host "Testing installation..." -ForegroundColor Blue
 Write-Host "   (This may take 30-60 seconds on first run - downloading AI models)" -ForegroundColor Yellow
 
 try {
-    $testCmd = if ($isPipInstall) { 
-        "'$python312Path' -m witticism --version"
-    } else { 
-        "'$python312Path' -m pipx run witticism --version" 
+    if ($isPipInstall) {
+        $testArgs = @("-m", "witticism", "--version")
+    } else {
+        $testArgs = @("-m", "pipx", "run", "witticism", "--version")
     }
     
     Write-Host "   Running: witticism --version..." -ForegroundColor Gray
     
     # Run with timeout to avoid hanging indefinitely
-    $job = Start-Job -ScriptBlock ([scriptblock]::Create($testCmd))
+    $testScript = {
+        param($pythonPath, $args)
+        & $pythonPath @args
+    }
+    $job = Start-Job -ScriptBlock $testScript -ArgumentList $python312Path, $testArgs
     $completed = Wait-Job $job -Timeout 90  # 90 second timeout
     
     if ($completed) {
