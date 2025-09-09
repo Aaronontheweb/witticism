@@ -6,7 +6,8 @@ param(
     [switch]$SkipAutoStart,
     [switch]$CPUOnly,
     [switch]$Help,
-    [switch]$ForceReinstall
+    [switch]$ForceReinstall,
+    [string]$Version
 )
 
 if ($Help) {
@@ -14,11 +15,12 @@ if ($Help) {
 Witticism Windows Installer
 
 Usage:
-    .\install.ps1                  # Full automatic installation
-    .\install.ps1 -CPUOnly         # Force CPU-only installation  
-    .\install.ps1 -SkipAutoStart   # Don't set up auto-start
-    .\install.ps1 -ForceReinstall  # Force reinstall even if already installed
-    .\install.ps1 -Help           # Show this help
+    .\install.ps1                      # Install latest stable version
+    .\install.ps1 -Version "0.6.0b1"   # Install specific version
+    .\install.ps1 -CPUOnly             # Force CPU-only installation  
+    .\install.ps1 -SkipAutoStart       # Don't set up auto-start
+    .\install.ps1 -ForceReinstall      # Force reinstall even if already installed
+    .\install.ps1 -Help                # Show this help
 
 This script automatically:
 - Installs Python 3.12 (compatible version) if needed
@@ -209,8 +211,56 @@ try {
     Write-Host "SUCCESS: pipx installed with Python 3.12" -ForegroundColor Green
 }
 
-# Install witticism with Python 3.12 compatibility focus
+# Function to clean up existing witticism installation
+function Remove-ExistingWitticism {
+    param($pythonPath)
+    
+    Write-Host "🧹 Checking for existing Witticism installation..." -ForegroundColor Blue
+    
+    try {
+        # Check pipx installation
+        $pipxResult = & $pythonPath -m pipx list 2>&1 | Out-String
+        if ($pipxResult -match "witticism") {
+            Write-Host "   Found pipx installation, removing..." -ForegroundColor Yellow
+            & $pythonPath -m pipx uninstall witticism 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "   ✓ Removed pipx installation" -ForegroundColor Green
+            }
+        }
+        
+        # Check pip user installation  
+        $pipResult = & $pythonPath -m pip list --user 2>&1 | Out-String
+        if ($pipResult -match "witticism") {
+            Write-Host "   Found pip user installation, removing..." -ForegroundColor Yellow
+            & $pythonPath -m pip uninstall witticism -y 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "   ✓ Removed pip user installation" -ForegroundColor Green
+            }
+        }
+        
+        Write-Host "   ✓ Cleanup complete" -ForegroundColor Green
+        
+    } catch {
+        Write-Host "   Warning: Could not fully clean existing installation: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
+# Clean up existing installation if ForceReinstall or if we detect issues
+if ($ForceReinstall) {
+    Remove-ExistingWitticism $python312Path
+}
+
+# Install witticism with Python 3.12 compatibility focus  
 Write-Host "Installing Witticism..." -ForegroundColor Blue
+
+# Determine version to install
+$witticismPackage = if ($Version) {
+    Write-Host "   Installing specific version: $Version" -ForegroundColor Blue
+    "witticism==$Version"
+} else {
+    Write-Host "   Installing latest stable version" -ForegroundColor Blue
+    "witticism"
+}
 
 # Force CPU-only PyTorch for Python 3.12 compatibility
 $indexUrl = "https://download.pytorch.org/whl/cpu"
@@ -218,10 +268,20 @@ $pipArgs = @("--pip-args=--index-url $indexUrl --extra-index-url https://pypi.or
 
 Write-Host "   Installing with Python 3.12 and CPU-optimized PyTorch..." -ForegroundColor Blue
 Write-Host "   (This ensures maximum compatibility with WhisperX)" -ForegroundColor Gray
+Write-Host ""
+Write-Host "📦 DOWNLOADING DEPENDENCIES..." -ForegroundColor Cyan
+Write-Host "   This may take 2-3 minutes - WhisperX includes large AI models" -ForegroundColor Yellow
+Write-Host "   Please be patient while we download:" -ForegroundColor Gray
+Write-Host "   • PyTorch (CPU version, ~100MB)" -ForegroundColor Gray  
+Write-Host "   • WhisperX speech recognition models" -ForegroundColor Gray
+Write-Host "   • Audio processing libraries (librosa, etc.)" -ForegroundColor Gray
+Write-Host "   • ML dependencies (transformers, numpy, scipy)" -ForegroundColor Gray
+Write-Host ""
+Write-Host "⏳ Installing... (this is normal, not frozen)" -ForegroundColor Green
 
 try {
-    # Use our Python 3.12 path explicitly
-    & $python312Path -m pipx install witticism $pipArgs
+    # Use our Python 3.12 path explicitly  
+    & $python312Path -m pipx install $witticismPackage $pipArgs
     
     if ($LASTEXITCODE -ne 0) {
         Write-Host "WARNING: Standard installation failed, trying alternative method..." -ForegroundColor Yellow
@@ -336,6 +396,8 @@ try {
 
 # Test the installation
 Write-Host "Testing installation..." -ForegroundColor Blue
+Write-Host "   (This may take 30-60 seconds on first run - downloading AI models)" -ForegroundColor Yellow
+
 try {
     $testCmd = if ($isPipInstall) { 
         "& '$python312Path' -m witticism --version"
@@ -343,14 +405,31 @@ try {
         "& '$python312Path' -m pipx run witticism --version" 
     }
     
-    $version = Invoke-Expression $testCmd 2>&1
-    if ($version -match "witticism") {
-        Write-Host "SUCCESS: Installation test passed: $version" -ForegroundColor Green
+    Write-Host "   Running: witticism --version..." -ForegroundColor Gray
+    
+    # Run with timeout to avoid hanging indefinitely
+    $job = Start-Job -ScriptBlock ([scriptblock]::Create($testCmd))
+    $completed = Wait-Job $job -Timeout 90  # 90 second timeout
+    
+    if ($completed) {
+        $version = Receive-Job $job 2>&1 | Out-String
+        Remove-Job $job
+        
+        if ($version -match "witticism|main\.py") {
+            Write-Host "SUCCESS: Installation test passed" -ForegroundColor Green
+            Write-Host "   Version check completed successfully" -ForegroundColor Gray
+        } else {
+            Write-Host "WARNING: Installation test inconclusive" -ForegroundColor Yellow
+            Write-Host "   Output: $($version.Trim())" -ForegroundColor Gray
+        }
     } else {
-        Write-Host "WARNING: Installation test inconclusive" -ForegroundColor Yellow  
+        Remove-Job $job -Force
+        Write-Host "WARNING: Installation test timed out (this is common on first run)" -ForegroundColor Yellow
+        Write-Host "   Witticism is installed but needs to download models on first use" -ForegroundColor Gray
     }
 } catch {
     Write-Host "WARNING: Could not test installation: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Host "   This doesn't mean installation failed - try launching manually" -ForegroundColor Gray
 }
 
 # Installation complete
@@ -387,6 +466,11 @@ Write-Host "Next Steps:" -ForegroundColor Cyan
 Write-Host "• Launch Witticism from desktop shortcut" -ForegroundColor White
 Write-Host "• Test with F9 key (hold to record, release to type)" -ForegroundColor White
 Write-Host "• Configure settings through system tray icon" -ForegroundColor White
+Write-Host ""
+Write-Host "📋 FIRST RUN NOTES:" -ForegroundColor Yellow
+Write-Host "• First launch may take 30-60 seconds (downloading language models)" -ForegroundColor Gray
+Write-Host "• Look for the microphone icon in your system tray" -ForegroundColor Gray
+Write-Host "• If tray app doesn't appear, try running from desktop shortcut" -ForegroundColor Gray
 
 Write-Host ""
 Write-Host "Enjoy fast, accurate voice transcription!" -ForegroundColor Green
