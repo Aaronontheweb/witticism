@@ -379,19 +379,33 @@ try {
     
     # First, try to find the witticism package assets directory
     try {
+        $witticismPkgPath = $null
+        
         if ($isPipInstall) {
             # For pip install, look in user site-packages
             $sitePkgPath = & $python312Path -c "import site; print(site.getusersitepackages())" 2>$null
+            if ($sitePkgPath -and (Test-Path $sitePkgPath)) {
+                $witticismPkgPath = Join-Path $sitePkgPath "witticism"
+            }
         } else {
-            # For pipx install, look in the pipx venv
-            $sitePkgPath = & $python312Path -m pipx environment --value PIPX_LOCAL_VENVS 2>$null
-            if ($sitePkgPath) {
-                $sitePkgPath = Join-Path $sitePkgPath "witticism\lib\site-packages"
+            # For pipx install, use standard Windows pipx paths
+            $pipxVenvPaths = @(
+                "$env:LOCALAPPDATA\pipx\venvs\witticism\Lib\site-packages",
+                "$env:USERPROFILE\.local\pipx\venvs\witticism\lib\site-packages",
+                "$env:APPDATA\pipx\venvs\witticism\lib\site-packages"
+            )
+            
+            foreach ($venvPath in $pipxVenvPaths) {
+                $testWitticismPath = Join-Path $venvPath "witticism"
+                if (Test-Path $testWitticismPath) {
+                    $witticismPkgPath = $testWitticismPath
+                    Write-Host "   Found witticism package at: $witticismPkgPath" -ForegroundColor Gray
+                    break
+                }
             }
         }
         
-        if ($sitePkgPath -and (Test-Path $sitePkgPath)) {
-            $witticismPkgPath = Join-Path $sitePkgPath "witticism"
+        if ($witticismPkgPath -and (Test-Path $witticismPkgPath)) {
             $assetsPath = Join-Path $witticismPkgPath "assets"
             
             if (Test-Path $assetsPath) {
@@ -400,9 +414,11 @@ try {
                 foreach ($size in $iconSizes) {
                     $iconPath = Join-Path $assetsPath "witticism_$size.png"
                     if (Test-Path $iconPath) {
-                        $shortcut.IconLocation = $iconPath
+                        # Ensure path is fully resolved and properly formatted
+                        $resolvedIconPath = (Resolve-Path $iconPath).Path
+                        $shortcut.IconLocation = $resolvedIconPath
                         $iconSet = $true
-                        Write-Host "   Using Witticism icon: $iconPath" -ForegroundColor Gray
+                        Write-Host "   Using Witticism icon: $resolvedIconPath" -ForegroundColor Gray
                         break
                     }
                 }
@@ -411,9 +427,10 @@ try {
                 if (-not $iconSet) {
                     $mainIconPath = Join-Path $assetsPath "witticism.png"
                     if (Test-Path $mainIconPath) {
-                        $shortcut.IconLocation = $mainIconPath
+                        $resolvedIconPath = (Resolve-Path $mainIconPath).Path
+                        $shortcut.IconLocation = $resolvedIconPath
                         $iconSet = $true
-                        Write-Host "   Using Witticism icon: $mainIconPath" -ForegroundColor Gray
+                        Write-Host "   Using Witticism icon: $resolvedIconPath" -ForegroundColor Gray
                     }
                 }
             }
