@@ -4,6 +4,50 @@
 
 set -e
 
+# Parse command line arguments
+VERSION=""
+FORCE_REINSTALL=false
+HELP=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --version)
+            VERSION="$2"
+            shift 2
+            ;;
+        --force-reinstall)
+            FORCE_REINSTALL=true
+            shift
+            ;;
+        --help|-h)
+            HELP=true
+            shift
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Use --help for usage information"
+            exit 1
+            ;;
+    esac
+done
+
+if [ "$HELP" = true ]; then
+    echo "Witticism Linux/macOS Installer"
+    echo ""
+    echo "Usage:"
+    echo "  ./install.sh                     # Install latest stable version"
+    echo "  ./install.sh --version 0.6.0b1   # Install specific version"  
+    echo "  ./install.sh --force-reinstall   # Force reinstall even if already installed"
+    echo "  ./install.sh --help              # Show this help"
+    echo ""
+    echo "This script automatically:"
+    echo "- Installs system dependencies (asks for sudo only if needed)"
+    echo "- Sets up isolated Python environment with pipx"
+    echo "- Detects GPU and installs appropriate PyTorch version"
+    echo "- Sets up desktop integration and auto-start"
+    exit 0
+fi
+
 echo "🎙️ Installing Witticism..."
 
 # Check if running as root/sudo (we don't want that)
@@ -88,6 +132,30 @@ if ! command -v pipx &> /dev/null; then
     echo "✓ pipx installed"
 else
     echo "✓ pipx already installed"
+fi
+
+# Function to clean up existing witticism installation
+cleanup_existing_witticism() {
+    echo "🧹 Checking for existing Witticism installation..."
+    
+    if pipx list | grep -q "witticism"; then
+        echo "   Found pipx installation, removing..."
+        pipx uninstall witticism || true
+        echo "   ✓ Removed pipx installation"
+    fi
+    
+    if pip list --user | grep -q "witticism"; then
+        echo "   Found pip user installation, removing..."  
+        pip uninstall witticism -y || true
+        echo "   ✓ Removed pip user installation"
+    fi
+    
+    echo "   ✓ Cleanup complete"
+}
+
+# Clean up existing installation if force reinstall requested
+if [ "$FORCE_REINSTALL" = true ]; then
+    cleanup_existing_witticism
 fi
 
 # 2. Detect GPU and install with right CUDA
@@ -249,6 +317,7 @@ if pipx list | grep -q "package witticism"; then
     echo "  Current version: $CURRENT_VERSION"
     
     # Check PyTorch version in the pipx environment
+    echo "  Checking PyTorch compatibility (this may take a moment)..."
     PYTORCH_CHECK=$(pipx run --spec witticism python -c "import torch; print(torch.__version__)" 2>/dev/null || echo "")
     if [ -n "$PYTORCH_CHECK" ]; then
         PYTORCH_VERSION="$PYTORCH_CHECK"
@@ -286,11 +355,17 @@ except:
     if [ "$LATEST_VERSION" != "unknown" ] && [ "$LATEST_VERSION" != "$CURRENT_VERSION" ]; then
         echo "  📦 New version available: $LATEST_VERSION"
         echo "🔄 Upgrading Witticism (preserving compatible PyTorch)..."
+        echo "⏳ This may take several minutes depending on what needs updating..."
         pipx upgrade witticism --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple"
     elif [ "$NEEDS_REINSTALL" = true ]; then
         echo "🔄 Reinstalling due to PyTorch compatibility..."
         echo "⏳ This may take several minutes as PyTorch needs to be updated"
-        pipx install --force witticism --verbose --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple --verbose"
+        if [ -n "$VERSION" ]; then
+            echo "   Installing specific version: $VERSION"
+            pipx install --force "witticism==$VERSION" --verbose --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple --verbose"
+        else
+            pipx install --force witticism --verbose --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple --verbose"
+        fi
     else
         echo "✓ Witticism is up to date with compatible PyTorch"
     fi
@@ -298,7 +373,12 @@ else
     echo "📦 Installing Witticism for the first time..."
     echo "⏳ This may take several minutes as PyTorch and WhisperX are large packages"
     echo ""
-    pipx install witticism --verbose --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple --verbose"
+    if [ -n "$VERSION" ]; then
+        echo "   Installing specific version: $VERSION"
+        pipx install "witticism==$VERSION" --verbose --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple --verbose"
+    else
+        pipx install witticism --verbose --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple --verbose"
+    fi
 fi
 
 # 4. Install icons from package

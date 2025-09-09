@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2025-09-09
+
+### 🚀 Stable Release: Windows Platform Support & Polish
+
+This stable release represents the completion of Windows platform support with major installer improvements, bug fixes, and documentation enhancements building on the beta1 foundation.
+
+### ✨ Improvements Since Beta1
+
+#### 🪟 Windows Installer Polish & Bug Fixes
+- **Fixed PowerShell syntax errors** that caused installation failures on some Windows systems ([#81](https://github.com/Aaronontheweb/witticism/issues/81))
+- **Enhanced installer UX** with version parameter support (`install.ps1 -Version 0.6.0`)
+- **Added cleanup functionality** with `-Cleanup` flag for clean reinstallation
+- **Improved progress indicators** during lengthy WhisperX downloads (2-3 minutes) with detailed explanations
+- **Enhanced desktop shortcut icon detection** using bundled Witticism assets with intelligent fallback
+- **Better timeout handling** for installation testing and verification
+- **Comprehensive uninstall documentation** with multiple removal options
+
+#### 📚 Documentation Enhancements  
+- **Fixed Windows installation command** in README.md ([#78](https://github.com/Aaronontheweb/witticism/issues/78))
+- **Improved Windows integration documentation** with detailed uninstall instructions
+- **Enhanced error messaging** and troubleshooting guidance for Windows users
+
+### 🔧 All Windows Features (from 0.6.0-beta1)
+
+#### Complete Windows Platform Support
+- **Full Windows compatibility** with cross-platform architecture
+- **PowerShell installer (install.ps1)** - One-line installation with automated Python management  
+- **Automated Python 3.12 setup** - Handles WhisperX compatibility automatically
+- **Auto-start functionality** - Silent background startup via Windows startup folder
+- **Desktop integration** - Shortcuts and proper Windows application integration
+
+#### Cross-Platform Architecture
+- **Platform-specific sleep monitoring** - Windows uses PowerShell/WMI, Linux uses DBus
+- **Cross-platform file locking** - Prevents multi-instance issues on both platforms
+- **Conditional dependencies** - pydbus Linux-only, preventing Windows conflicts
+- **Unicode console compatibility** - ASCII fallbacks for Windows terminals
+
+### 📊 Platform Compatibility
+- **Windows** - Full support with CPU-only transcription, auto-start, and silent operation
+- **Linux** - Maintains all existing functionality including GPU acceleration and systemd integration
+- **Future-ready** - Architecture prepared for macOS support
+
+This release transforms Witticism into a mature, cross-platform voice transcription tool with polished installation experiences on both Windows and Linux platforms.
+
 ## [0.6.0-beta1] - 2025-09-09
 
 ### 🚀 Major Beta Release: Complete Windows Platform Support
@@ -329,7 +373,8 @@ This release completes the foundational observability and recovery systems that 
 - Audio device selection
 - Configuration persistence
 
-[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/v0.6.0-beta1...HEAD
+[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/0.6.0...HEAD
+[0.6.0]: https://github.com/Aaronontheweb/witticism/compare/v0.6.0-beta1...0.6.0
 [0.6.0-beta1]: https://github.com/Aaronontheweb/witticism/compare/0.5.0...v0.6.0-beta1
 [0.5.0]: https://github.com/Aaronontheweb/witticism/compare/0.4.6...0.5.0
 [0.4.6]: https://github.com/Aaronontheweb/witticism/compare/0.4.5...0.4.6
