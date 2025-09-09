@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Dict, Any
 from enum import Enum
 import logging
+import os
 import platform
 import subprocess
 import sys
@@ -46,6 +47,20 @@ class DependencyValidator:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
         self.current_platform = platform.system().lower()
+
+    def _is_headless_environment(self) -> bool:
+        """Detect if we're running in a headless/display-less environment"""
+        # Most reliable for CI environments
+        return (
+            not os.environ.get('DISPLAY') and 
+            os.environ.get('CI') == 'true'
+        ) or (
+            # GitHub Actions specific
+            os.environ.get('GITHUB_ACTIONS') == 'true'
+        ) or (
+            # General headless indicators
+            os.environ.get('HEADLESS') == 'true'
+        )
 
     def validate_all(self) -> List[DependencyResult]:
         """Validate all dependencies and return results"""
