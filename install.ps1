@@ -287,13 +287,17 @@ if ($DryRun) {
     Write-Host "Installing Witticism on Windows..." -ForegroundColor Green
 }
 
-# Check if running as Administrator
-$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if ($isAdmin) {
-    Write-Host "ERROR: Please don't run this installer as Administrator!" -ForegroundColor Red
-    Write-Host "   Run it as your regular user account." -ForegroundColor Yellow
-    Write-Host "   The script will handle any necessary permissions." -ForegroundColor Yellow
-    exit 1
+# Check if running as Administrator (skip check in CI environments)
+if (-not $env:CI) {
+    $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    if ($isAdmin) {
+        Write-Host "ERROR: Please don't run this installer as Administrator!" -ForegroundColor Red
+        Write-Host "   Run it as your regular user account." -ForegroundColor Yellow
+        Write-Host "   The script will handle any necessary permissions." -ForegroundColor Yellow
+        exit 1
+    }
+} else {
+    Write-Host "Running in CI environment - skipping admin check" -ForegroundColor Gray
 }
 
 # Function to install Python 3.12 automatically

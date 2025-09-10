@@ -95,6 +95,8 @@ jobs:
         Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
         # Set environment variable to install beta version with Windows support
         $env:WITTICISM_VERSION = "0.6.0b1"
+        # Set CI environment variable to bypass admin check
+        $env:CI = "true"
         .\install.ps1 -CPUOnly -SkipAutoStart
     
     - name: Verify Windows installation
@@ -148,6 +150,8 @@ jobs:
         Write-Host "Testing idempotent Windows installation..."
         # Set environment variable to install beta version with Windows support
         $env:WITTICISM_VERSION = "0.6.0b1"
+        # Set CI environment variable to bypass admin check
+        $env:CI = "true"
         .\install.ps1 -CPUOnly -SkipAutoStart
     
     - name: Verify Windows installation still works after second run
