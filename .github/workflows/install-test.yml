@@ -80,12 +80,9 @@ jobs:
         fi
         echo "SUCCESS: Witticism still working after idempotent install"
 
-  # TODO: Re-enable after Windows support is released to PyPI
-  # Currently disabled because the live PyPI package doesn't include Windows support yet
-  test-windows-install-disabled:
-    if: false  # Temporarily disabled
+  test-windows-install:
     runs-on: windows-latest
-    name: Test Windows Install Script (Disabled - Pre-Release)
+    name: Test Windows Install Script
     
     steps:
     - name: Checkout code
@@ -96,6 +93,8 @@ jobs:
       run: |
         Write-Host "Testing initial Windows installation..."
         Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
+        # Set CI environment variable to bypass admin check
+        $env:CI = "true"
         .\install.ps1 -CPUOnly -SkipAutoStart
     
     - name: Verify Windows installation
@@ -147,6 +146,8 @@ jobs:
       shell: powershell
       run: |
         Write-Host "Testing idempotent Windows installation..."
+        # Set CI environment variable to bypass admin check
+        $env:CI = "true"
         .\install.ps1 -CPUOnly -SkipAutoStart
     
     - name: Verify Windows installation still works after second run
@@ -228,11 +229,9 @@ jobs:
         # Provide fake display for pynput compatibility in headless CI
         DISPLAY: ':99'
 
-  # TODO: Re-enable after Windows support is released to PyPI  
-  test-windows-manual-disabled:
-    if: false  # Temporarily disabled
+  test-windows-manual:
     runs-on: windows-latest
-    name: Test Windows Manual Installation Steps (Disabled - Pre-Release)
+    name: Test Windows Manual Installation Steps
     
     steps:
     - name: Checkout code
@@ -251,7 +250,7 @@ jobs:
         # Install pipx
         python -m pip install --user pipx
         
-        # Install CPU-only version
+        # Install latest version from PyPI
         python -m pipx install witticism --pip-args="--index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple"
         
         # Verify installation

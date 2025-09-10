@@ -287,13 +287,17 @@ if ($DryRun) {
     Write-Host "Installing Witticism on Windows..." -ForegroundColor Green
 }
 
-# Check if running as Administrator
-$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if ($isAdmin) {
-    Write-Host "ERROR: Please don't run this installer as Administrator!" -ForegroundColor Red
-    Write-Host "   Run it as your regular user account." -ForegroundColor Yellow
-    Write-Host "   The script will handle any necessary permissions." -ForegroundColor Yellow
-    exit 1
+# Check if running as Administrator (skip check in CI environments)
+if (-not $env:CI) {
+    $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    if ($isAdmin) {
+        Write-Host "ERROR: Please don't run this installer as Administrator!" -ForegroundColor Red
+        Write-Host "   Run it as your regular user account." -ForegroundColor Yellow
+        Write-Host "   The script will handle any necessary permissions." -ForegroundColor Yellow
+        exit 1
+    }
+} else {
+    Write-Host "Running in CI environment - skipping admin check" -ForegroundColor Gray
 }
 
 # Function to install Python 3.12 automatically
@@ -510,7 +514,7 @@ try {
     
     foreach ($path in $pipxPaths) {
         if (Test-Path $path -PathType Container) {
-            $env:PATH += ";$path"
+            $env:PATH = $env:PATH + ";$path"
         }
     }
     
@@ -620,14 +624,14 @@ Write-Host ""
 Write-Host "Installing... (this is normal, not frozen)" -ForegroundColor Green
 
 try {
-    # Use our Python 3.12 path explicitly  
+    # Use our Python 3.12 path explicitly
     & $python312Path -m pipx install $witticismPackage $pipArgs
     
     if ($LASTEXITCODE -ne 0) {
         Write-Host "WARNING: Standard installation failed, trying alternative method..." -ForegroundColor Yellow
         
         # Alternative: Use pip directly in user space
-        & $python312Path -m pip install --user witticism --index-url $indexUrl --extra-index-url https://pypi.org/simple
+        & $python312Path -m pip install --user $witticismPackage --index-url $indexUrl --extra-index-url https://pypi.org/simple
         
         if ($LASTEXITCODE -ne 0) {
             throw "Both pipx and pip installation methods failed"
