@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2025-09-10
+
+### 🪟 Windows Integration & UX Improvements
+
+This patch release focuses on polishing the Windows experience with improved desktop integration and installation user experience.
+
+### ✨ Improved
+
+#### Windows Desktop Integration
+- **Enhanced desktop shortcuts** - Added native Windows .ico file with multi-resolution support (16x16 to 256x256) for proper taskbar and desktop icons ([#85](https://github.com/Aaronontheweb/witticism/pull/85))
+- **Fixed PyPI distribution** - Witticism.ico now included in PyPI packages, ensuring production installs display proper icons instead of Python defaults ([#86](https://github.com/Aaronontheweb/witticism/pull/86))
+- **Improved Windows installer** - PowerShell installer now prioritizes .ico files with PNG fallback for maximum compatibility
+
+#### Installation User Experience  
+- **Progress indicators** - Added clear progress messages during PyTorch compatibility checks and package downloads ([#83](https://github.com/Aaronontheweb/witticism/pull/83))
+- **Prevents installer confusion** - Users now see "Checking PyTorch compatibility (this may take a moment)..." instead of apparent freezing during 1-2 minute operations
+- **Better upgrade messaging** - Clear timing expectations for upgrade operations that download large packages
+
+#### Quality & Reliability
+- **Comprehensive Windows testing** - Re-enabled full Windows installation test suite with beta version support ([#79](https://github.com/Aaronontheweb/witticism/pull/79))
+- **Enhanced CI coverage** - Both automated PowerShell installer and manual installation methods now tested on every release
+- **Installation reliability** - Early detection of Windows-specific installation issues through comprehensive CI testing
+
+### 📊 Impact
+This release completes the Windows platform experience by addressing the final polish items for desktop integration and installation UX. Windows users now get:
+- Proper application icons in all contexts (desktop, taskbar, file explorer)
+- Clear feedback during installation operations 
+- Confidence in installation reliability through comprehensive automated testing
+
 ## [0.6.0] - 2025-09-09
 
 ### 🚀 Stable Release: Windows Platform Support & Polish
@@ -373,7 +402,8 @@ This release completes the foundational observability and recovery systems that 
 - Audio device selection
 - Configuration persistence
 
-[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/0.6.0...HEAD
+[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/0.6.1...HEAD
+[0.6.1]: https://github.com/Aaronontheweb/witticism/compare/0.6.0...0.6.1
 [0.6.0]: https://github.com/Aaronontheweb/witticism/compare/v0.6.0-beta1...0.6.0
 [0.6.0-beta1]: https://github.com/Aaronontheweb/witticism/compare/0.5.0...v0.6.0-beta1
 [0.5.0]: https://github.com/Aaronontheweb/witticism/compare/0.4.6...0.5.0
