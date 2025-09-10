@@ -93,8 +93,6 @@ jobs:
       run: |
         Write-Host "Testing initial Windows installation..."
         Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
-        # Set environment variable to install beta version with Windows support
-        $env:WITTICISM_VERSION = "0.6.0b1"
         # Set CI environment variable to bypass admin check
         $env:CI = "true"
         .\install.ps1 -CPUOnly -SkipAutoStart
@@ -148,8 +146,6 @@ jobs:
       shell: powershell
       run: |
         Write-Host "Testing idempotent Windows installation..."
-        # Set environment variable to install beta version with Windows support
-        $env:WITTICISM_VERSION = "0.6.0b1"
         # Set CI environment variable to bypass admin check
         $env:CI = "true"
         .\install.ps1 -CPUOnly -SkipAutoStart
@@ -254,8 +250,8 @@ jobs:
         # Install pipx
         python -m pip install --user pipx
         
-        # Install beta version with Windows support
-        python -m pipx install "witticism==0.6.0b1" --pip-args="--index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple"
+        # Install latest version from PyPI
+        python -m pipx install witticism --pip-args="--index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple"
         
         # Verify installation
         python -m pipx run witticism --version

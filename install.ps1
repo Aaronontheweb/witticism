@@ -591,11 +591,8 @@ if ($ForceReinstall) {
 # Install witticism with Python 3.12 compatibility focus  
 Write-Host "Installing Witticism..." -ForegroundColor Blue
 
-# Determine version to install (prioritize environment variable for CI, then parameter)
-$witticismPackage = if ($env:WITTICISM_VERSION) {
-    Write-Host "   Installing specific version from env: $env:WITTICISM_VERSION" -ForegroundColor Blue
-    "witticism==$env:WITTICISM_VERSION"
-} elseif ($Version) {
+# Determine version to install
+$witticismPackage = if ($Version) {
     Write-Host "   Installing specific version: $Version" -ForegroundColor Blue
     "witticism==$Version"
 } else {
