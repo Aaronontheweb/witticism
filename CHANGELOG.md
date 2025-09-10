@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2025-09-10
+
+### 🔧 Fixed
+
+#### Windows Installation Reliability
+- **Resolved Windows compilation failures** - Switched from `webrtcvad>=2.0.10` to `webrtcvad-wheels>=2.0.14` to eliminate Visual C++ Build Tools requirement ([#88](https://github.com/Aaronontheweb/witticism/pull/88))
+- **Eliminated installation errors** - Windows users no longer encounter "Microsoft Visual C++ 14.0 or greater is required" error during installation
+- **Pre-compiled binary wheels** - Installation now uses pre-built binaries for Windows, macOS, and Linux instead of requiring compilation
+- **Maintained functionality** - Same API compatibility and voice activity detection performance as original webrtcvad
+
+### 📊 Impact
+This patch release resolves the most common Windows installation issue by switching to a dependency that provides pre-compiled binary wheels. Windows users can now install Witticism instantly without needing Visual Studio Build Tools, while maintaining identical functionality and performance.
+
 ## [0.6.1] - 2025-09-10
 
 ### 🪟 Windows Integration & UX Improvements
@@ -402,7 +415,8 @@ This release completes the foundational observability and recovery systems that 
 - Audio device selection
 - Configuration persistence
 
-[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/0.6.1...HEAD
+[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/0.6.2...HEAD
+[0.6.2]: https://github.com/Aaronontheweb/witticism/compare/0.6.1...0.6.2
 [0.6.1]: https://github.com/Aaronontheweb/witticism/compare/0.6.0...0.6.1
 [0.6.0]: https://github.com/Aaronontheweb/witticism/compare/v0.6.0-beta1...0.6.0
 [0.6.0-beta1]: https://github.com/Aaronontheweb/witticism/compare/0.5.0...v0.6.0-beta1
