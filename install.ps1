@@ -135,9 +135,8 @@ function Get-WitticismPackageInfo {
         if (Test-Path $assetsPath) {
             if ($verbose) {
                 Write-Host "   Available icon files:" -ForegroundColor Gray
-                Get-ChildItem -Path $assetsPath -Name "*.ico", "*.png" | ForEach-Object {
-                    Write-Host "   - $_" -ForegroundColor Gray
-                }
+                Get-ChildItem -Path $assetsPath -Filter "*.ico" | ForEach-Object { Write-Host "   - $($_.Name)" -ForegroundColor Gray }
+                Get-ChildItem -Path $assetsPath -Filter "*.png" | ForEach-Object { Write-Host "   - $($_.Name)" -ForegroundColor Gray }
             }
             
             # First check for .ico file (best for Windows shortcuts)
