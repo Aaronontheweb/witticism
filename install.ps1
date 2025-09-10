@@ -135,40 +135,57 @@ function Get-WitticismPackageInfo {
         if (Test-Path $assetsPath) {
             if ($verbose) {
                 Write-Host "   Available icon files:" -ForegroundColor Gray
-                Get-ChildItem -Path $assetsPath -Name "*.png" | ForEach-Object {
+                Get-ChildItem -Path $assetsPath -Name "*.ico", "*.png" | ForEach-Object {
                     Write-Host "   - $_" -ForegroundColor Gray
                 }
             }
             
-            # Look for a suitable icon file
-            $iconSizes = @("48x48", "32x32", "64x64", "24x24", "16x16")
-            foreach ($size in $iconSizes) {
-                $iconPath = Join-Path $assetsPath "witticism_$size.png"
+            # First check for .ico file (best for Windows shortcuts)
+            $icoPath = Join-Path $assetsPath "witticism.ico"
+            if ($verbose) {
+                Write-Host "   Checking for Windows .ico file: witticism.ico - Exists: $(Test-Path $icoPath)" -ForegroundColor Gray
+            }
+            if (Test-Path $icoPath) {
+                # Ensure path is fully resolved and properly formatted
+                $result.IconPath = (Resolve-Path $icoPath).Path
+                $result.IconSet = $true
                 if ($verbose) {
-                    Write-Host "   Checking for icon: witticism_$size.png - Exists: $(Test-Path $iconPath)" -ForegroundColor Gray
-                }
-                if (Test-Path $iconPath) {
-                    # Ensure path is fully resolved and properly formatted
-                    $result.IconPath = (Resolve-Path $iconPath).Path
-                    $result.IconSet = $true
-                    if ($verbose) {
-                        Write-Host "   [OK] Found icon: $($result.IconPath)" -ForegroundColor Green
-                    }
-                    break
+                    Write-Host "   [OK] Found Windows .ico file: $($result.IconPath)" -ForegroundColor Green
                 }
             }
             
-            # Fallback to main icon if sized icons not found
+            # Fallback to PNG icons if .ico not found
+            if (-not $result.IconSet) {
+                # Look for a suitable PNG icon file
+                $iconSizes = @("48x48", "32x32", "64x64", "24x24", "16x16")
+                foreach ($size in $iconSizes) {
+                    $iconPath = Join-Path $assetsPath "witticism_$size.png"
+                    if ($verbose) {
+                        Write-Host "   Checking for PNG icon: witticism_$size.png - Exists: $(Test-Path $iconPath)" -ForegroundColor Gray
+                    }
+                    if (Test-Path $iconPath) {
+                        # Ensure path is fully resolved and properly formatted
+                        $result.IconPath = (Resolve-Path $iconPath).Path
+                        $result.IconSet = $true
+                        if ($verbose) {
+                            Write-Host "   [OK] Found PNG icon: $($result.IconPath)" -ForegroundColor Green
+                        }
+                        break
+                    }
+                }
+            }
+            
+            # Fallback to main PNG icon if sized icons not found
             if (-not $result.IconSet) {
                 $mainIconPath = Join-Path $assetsPath "witticism.png"
                 if ($verbose) {
-                    Write-Host "   Checking fallback icon: witticism.png - Exists: $(Test-Path $mainIconPath)" -ForegroundColor Gray
+                    Write-Host "   Checking fallback PNG icon: witticism.png - Exists: $(Test-Path $mainIconPath)" -ForegroundColor Gray
                 }
                 if (Test-Path $mainIconPath) {
                     $result.IconPath = (Resolve-Path $mainIconPath).Path
                     $result.IconSet = $true
                     if ($verbose) {
-                        Write-Host "   [OK] Found fallback icon: $($result.IconPath)" -ForegroundColor Green
+                        Write-Host "   [OK] Found fallback PNG icon: $($result.IconPath)" -ForegroundColor Green
                     }
                 }
             }
