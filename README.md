@@ -229,16 +229,48 @@ This fix prevents the `nvidia_uvm` kernel module from becoming corrupted during 
 First run downloads models (~150MB for base). Ensure stable internet connection.
 
 ### Debug logging
-By default, witticism logs to `~/.local/share/witticism/debug.log` when debug level is enabled. 
+
+**Log file locations:**
+- **Linux**: `~/.local/share/witticism/debug.log`
+- **Windows**: `%LOCALAPPDATA%\witticism\debug.log` (e.g., `C:\Users\YourName\AppData\Local\witticism\debug.log`)
 
 To enable debug logging, either:
 - Run with `--log-level DEBUG`
-- Edit `~/.config/witticism/config.json` and set `"logging": {"level": "DEBUG", "file": "~/.local/share/witticism/debug.log"}`
+- Edit the config file and set `"logging": {"level": "DEBUG", "file": "<path-to-log-file>"}`
+  - **Linux config**: `~/.config/witticism/config.json`
+  - **Windows config**: `%APPDATA%\witticism\config.json`
 
 Common issues visible in debug logs:
 - "No active speech found in audio" - Check microphone connection/volume
 - CUDA context errors - Restart after suspend/resume
 - Model loading failures - Check GPU memory with `nvidia-smi`
+
+### Force Reinstall
+
+If you need to force a complete reinstallation (e.g., to fix corrupted dependencies or reset settings):
+
+**Linux:**
+```bash
+# Force reinstall with the installer
+curl -sSL https://raw.githubusercontent.com/Aaronontheweb/witticism/master/install.sh | bash -s -- --force
+```
+
+**Windows:**
+```powershell
+# Force reinstall with all dependencies
+irm https://raw.githubusercontent.com/Aaronontheweb/witticism/master/install.ps1 | iex -ForceReinstall
+
+# Additional options can be combined:
+# Force CPU-only reinstall without auto-start
+$script = irm https://raw.githubusercontent.com/Aaronontheweb/witticism/master/install.ps1
+& ([scriptblock]::Create($script)) -ForceReinstall -CPUOnly -SkipAutoStart
+```
+
+The force reinstall option will:
+- Remove existing Witticism installation
+- Clear the pipx/pip cache
+- Reinstall all dependencies fresh
+- Preserve your configuration files (unless you use `--reset-config`)
 
 ## Development
 

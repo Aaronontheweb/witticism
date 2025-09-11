@@ -81,6 +81,23 @@ After installation:
 4. **System Tray**: Look for Witticism icon in system tray
 5. **Auto-start**: Witticism starts automatically on Windows login
 
+## Important File Locations
+
+After installation, Witticism stores files in the following Windows locations:
+
+- **Configuration**: `%APPDATA%\witticism\config.json` (e.g., `C:\Users\YourName\AppData\Roaming\witticism\config.json`)
+- **Debug logs**: `%LOCALAPPDATA%\witticism\debug.log` (e.g., `C:\Users\YourName\AppData\Local\witticism\debug.log`)
+- **Models cache**: `%USERPROFILE%\.cache\whisper` (downloaded Whisper models)
+
+To view debug logs:
+```powershell
+# Open debug log in Notepad
+notepad "$env:LOCALAPPDATA\witticism\debug.log"
+
+# Or view in PowerShell
+Get-Content "$env:LOCALAPPDATA\witticism\debug.log" -Tail 50
+```
+
 ## Troubleshooting
 
 ### PowerShell Execution Policy
