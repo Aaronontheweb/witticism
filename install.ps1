@@ -616,8 +616,104 @@ $witticismPackage = if ($Version) {
     "witticism"
 }
 
-# Force CPU-only PyTorch for Python 3.12 compatibility
-$indexUrl = "https://download.pytorch.org/whl/cpu"
+# Detect GPU and select appropriate PyTorch index
+if ($CPUOnly) {
+    Write-Host "   CPU-only mode forced via parameter" -ForegroundColor Yellow
+    $indexUrl = "https://download.pytorch.org/whl/cpu"
+    Write-Host "   Using CPU-optimized PyTorch" -ForegroundColor Blue
+} else {
+    # Try to detect NVIDIA GPU
+    $hasNvidia = $false
+    $cudaVersion = $null
+    
+    try {
+        # Check if nvidia-smi is available in PATH or common locations
+        $nvidiaSmiPath = Get-Command nvidia-smi -ErrorAction SilentlyContinue
+        
+        if (-not $nvidiaSmiPath) {
+            # Try common NVIDIA installation paths on Windows
+            $commonPaths = @(
+                "$env:ProgramFiles\NVIDIA Corporation\NVSMI\nvidia-smi.exe",
+                "$env:ProgramFiles(x86)\NVIDIA Corporation\NVSMI\nvidia-smi.exe",
+                "$env:SystemRoot\System32\nvidia-smi.exe",
+                "$env:WinDir\System32\nvidia-smi.exe"
+            )
+            
+            foreach ($path in $commonPaths) {
+                if (Test-Path $path) {
+                    $nvidiaSmiPath = Get-Item $path
+                    break
+                }
+            }
+        }
+        
+        if ($nvidiaSmiPath) {
+            # Run nvidia-smi and capture output
+            $nvidiaSmiOutput = & $nvidiaSmiPath.FullName 2>$null
+            if ($LASTEXITCODE -eq 0 -and $nvidiaSmiOutput) {
+                $hasNvidia = $true
+                
+                # Extract CUDA version from nvidia-smi output
+                foreach ($line in $nvidiaSmiOutput) {
+                    if ($line -match "CUDA Version:\s*(\d+\.\d+)") {
+                        $cudaVersion = $matches[1]
+                        break
+                    }
+                }
+                
+                if ($cudaVersion) {
+                    Write-Host "   GPU detected with CUDA $cudaVersion" -ForegroundColor Green
+                    
+                    # Select appropriate PyTorch index based on CUDA version
+                    $cudaMajor = [int]($cudaVersion.Split('.')[0])
+                    $cudaMinor = [int]($cudaVersion.Split('.')[1])
+                    
+                    if ($cudaMajor -eq 12 -and $cudaMinor -ge 1) {
+                        $indexUrl = "https://download.pytorch.org/whl/cu121"
+                        Write-Host "   Using PyTorch with CUDA 12.1 support" -ForegroundColor Green
+                    } elseif ($cudaMajor -eq 11 -and $cudaMinor -ge 8) {
+                        $indexUrl = "https://download.pytorch.org/whl/cu118"
+                        Write-Host "   Using PyTorch with CUDA 11.8 support" -ForegroundColor Green
+                    } else {
+                        Write-Host "   Warning: CUDA $cudaVersion is older, using CPU-only PyTorch" -ForegroundColor Yellow
+                        Write-Host "   For GPU support, upgrade to CUDA 11.8 or newer" -ForegroundColor Yellow
+                        $indexUrl = "https://download.pytorch.org/whl/cpu"
+                    }
+                } else {
+                    Write-Host "   GPU detected but could not determine CUDA version" -ForegroundColor Yellow
+                    Write-Host "   Using CPU-only PyTorch (use -CPUOnly to suppress this warning)" -ForegroundColor Yellow
+                    $indexUrl = "https://download.pytorch.org/whl/cpu"
+                }
+            }
+        }
+    } catch {
+        # Silently fall back to CPU if detection fails
+    }
+    
+    # If nvidia-smi wasn't found or failed, try WMI as fallback
+    if (-not $hasNvidia) {
+        try {
+            # Use WMI to check for NVIDIA GPUs
+            $gpus = Get-WmiObject Win32_VideoController | Where-Object { $_.Name -match "NVIDIA" }
+            if ($gpus) {
+                Write-Host "   NVIDIA GPU detected via system query: $($gpus[0].Name)" -ForegroundColor Yellow
+                Write-Host "   Warning: Could not determine CUDA version (nvidia-smi not found)" -ForegroundColor Yellow
+                Write-Host "   Attempting to use CUDA 11.8 PyTorch (most compatible)" -ForegroundColor Yellow
+                Write-Host "   If this fails, re-run with -CPUOnly flag" -ForegroundColor Yellow
+                $indexUrl = "https://download.pytorch.org/whl/cu118"
+                $hasNvidia = $true
+            }
+        } catch {
+            # WMI query failed, continue with CPU
+        }
+    }
+    
+    if (-not $hasNvidia) {
+        Write-Host "   No NVIDIA GPU detected - using CPU-optimized PyTorch" -ForegroundColor Blue
+        $indexUrl = "https://download.pytorch.org/whl/cpu"
+    }
+}
+
 $pipArgs = @("--pip-args=--index-url $indexUrl --extra-index-url https://pypi.org/simple")
 
 # Add --force flag if ForceReinstall is specified
@@ -626,13 +722,17 @@ if ($ForceReinstall) {
     Write-Host "   Using --force to override existing installation" -ForegroundColor Yellow
 }
 
-Write-Host "   Installing with Python 3.12 and CPU-optimized PyTorch..." -ForegroundColor Blue
-Write-Host "   (This ensures maximum compatibility with WhisperX)" -ForegroundColor Gray
+Write-Host "   Installing with Python 3.12 and appropriate PyTorch version..." -ForegroundColor Blue
+Write-Host "   (Automatically selecting GPU or CPU based on your system)" -ForegroundColor Gray
 Write-Host ""
 Write-Host "DOWNLOADING DEPENDENCIES..." -ForegroundColor Cyan
 Write-Host "   This may take 2-3 minutes - WhisperX includes large AI models" -ForegroundColor Yellow
 Write-Host "   Please be patient while we download:" -ForegroundColor Gray
-Write-Host "   - PyTorch (CPU version, ~100MB)" -ForegroundColor Gray  
+if ($indexUrl -match "cu") {
+    Write-Host "   - PyTorch (CUDA version for GPU acceleration, ~2GB)" -ForegroundColor Gray
+} else {
+    Write-Host "   - PyTorch (CPU version, ~200MB)" -ForegroundColor Gray
+}  
 Write-Host "   - WhisperX speech recognition models" -ForegroundColor Gray
 Write-Host "   - Audio processing libraries (librosa, etc.)" -ForegroundColor Gray
 Write-Host "   - ML dependencies (transformers, numpy, scipy)" -ForegroundColor Gray
@@ -845,7 +945,13 @@ Write-Host ""
 Write-Host "Python Environment:" -ForegroundColor Cyan
 Write-Host "- Python: $python312Path" -ForegroundColor White
 Write-Host "- Version: $(& $python312Path --version)" -ForegroundColor White
-Write-Host "- PyTorch: CPU-optimized (maximum compatibility)" -ForegroundColor White
+if ($indexUrl -match "cu121") {
+    Write-Host "- PyTorch: CUDA 12.1 optimized (GPU acceleration enabled)" -ForegroundColor Green
+} elseif ($indexUrl -match "cu118") {
+    Write-Host "- PyTorch: CUDA 11.8 optimized (GPU acceleration enabled)" -ForegroundColor Green
+} else {
+    Write-Host "- PyTorch: CPU-optimized (no GPU detected or forced CPU mode)" -ForegroundColor White
+}
 Write-Host "- WhisperX: Latest compatible version" -ForegroundColor White
 
 if (-not $SkipAutoStart) {
