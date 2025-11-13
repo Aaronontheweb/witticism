@@ -45,3 +45,12 @@ class OutputManager:
     def set_output_mode(self, mode: str) -> None:
         self.output_mode = mode
         logger.info(f"Output mode changed to: {mode}")
+
+    def cleanup(self) -> None:
+        """Release pynput resources to prevent stale state on relaunch."""
+        try:
+            # Release the keyboard controller
+            self.keyboard = None
+            logger.info("OutputManager resources released")
+        except Exception as e:
+            logger.error(f"Error during OutputManager cleanup: {e}")
