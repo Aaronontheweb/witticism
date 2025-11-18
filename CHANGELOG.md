@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2025-11-17
+
+### 🔧 Fixed
+
+#### Application State Persistence
+- **Fixed text typing failure after quit and relaunch** - Resolved issue where text insertion would fail silently after quitting and relaunching the application ([#96](https://github.com/Aaronontheweb/witticism/pull/96))
+- Application state now properly resets between sessions, ensuring consistent text typing behavior
+
+#### Windows Installation & GPU Support
+- **Fixed Windows installer CUDA detection** - PowerShell installer now properly detects and configures CUDA support on Windows systems ([#91](https://github.com/Aaronontheweb/witticism/pull/91))
+- Windows users with NVIDIA GPUs can now take advantage of GPU acceleration during installation
+- Improved GPU detection logic prevents installation failures on CUDA-enabled systems
+
+#### Windows Installer Reliability
+- **Fixed PowerShell Get-ChildItem syntax error** - Resolved syntax error in icon detection that caused installer failures on some Windows configurations ([#90](https://github.com/Aaronontheweb/witticism/pull/90))
+- Icon detection now works correctly across all Windows PowerShell versions
+- Installation completes successfully without syntax-related failures
+
+### 📚 Documentation
+
+#### Windows Troubleshooting
+- **Added Windows debug log locations** - Comprehensive documentation for locating debug logs on Windows systems ([#92](https://github.com/Aaronontheweb/witticism/pull/92))
+- **Added force reinstall instructions** - Step-by-step guide for performing clean reinstallation when needed
+- Improved troubleshooting documentation helps Windows users resolve issues more effectively
+
+### 📊 Impact
+This release focuses on polish and reliability improvements for Windows users. Key improvements include:
+- More reliable text insertion after application restarts
+- Better GPU acceleration support during Windows installation
+- Improved installer reliability across different Windows configurations
+- Enhanced troubleshooting documentation for Windows-specific issues
+
 ## [0.6.2] - 2025-09-10
 
 ### 🔧 Fixed
@@ -415,7 +447,8 @@ This release completes the foundational observability and recovery systems that 
 - Audio device selection
 - Configuration persistence
 
-[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/0.6.2...HEAD
+[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/0.7.0...HEAD
+[0.7.0]: https://github.com/Aaronontheweb/witticism/compare/0.6.2...0.7.0
 [0.6.2]: https://github.com/Aaronontheweb/witticism/compare/0.6.1...0.6.2
 [0.6.1]: https://github.com/Aaronontheweb/witticism/compare/0.6.0...0.6.1
 [0.6.0]: https://github.com/Aaronontheweb/witticism/compare/v0.6.0-beta1...0.6.0
