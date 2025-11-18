@@ -58,7 +58,8 @@ def ensure_single_instance():
     """Ensure only one instance of Witticism is running with cross-platform support.
 
     Returns:
-        file object: Lock file handle to keep alive, or None if another instance is running
+        tuple: (lock_file, lock_file_path) where lock_file is the file handle to keep alive,
+               or (None, None) if another instance is running
     """
     # Use platform-appropriate temp directory
     if platform.system().lower() == 'windows':
@@ -93,7 +94,7 @@ def ensure_single_instance():
         lock_file.flush()
 
         logger.info(f"[WITTICISM] SINGLETON_LOCK: acquired singleton lock at {lock_file_path}")
-        return lock_file  # Keep this alive to maintain lock
+        return lock_file, lock_file_path  # Keep lock_file alive to maintain lock
 
     except (IOError, OSError) as e:
         # Lock file exists - check if the process is still running
@@ -117,7 +118,7 @@ def ensure_single_instance():
                                 f"Another instance of Witticism is already running (PID {old_pid}).\n\n"
                                 "Check your system tray or use 'ps aux | grep witticism' to find it."
                             )
-                        return None
+                        return None, None
 
                     except OSError:
                         # Process doesn't exist - zombie lock file
@@ -138,7 +139,7 @@ def ensure_single_instance():
 
         # Default fallback - couldn't determine state
         logger.error(f"[WITTICISM] LOCK_FAILED: could not acquire singleton lock - {e}")
-        return None
+        return None, None
 
 
 class WitticismApp:
@@ -454,6 +455,9 @@ class WitticismApp:
         if self.engine:
             self.engine.cleanup()
 
+        if self.output_manager:
+            self.output_manager.cleanup()
+
         logger.info("[WITTICISM] CLEANUP_COMPLETE: all components cleaned up successfully")
 
 
@@ -491,7 +495,7 @@ def main():
         sys.exit(0)
 
     # Check for single instance before initializing Qt
-    lock_file = ensure_single_instance()
+    lock_file, lock_file_path = ensure_single_instance()
     if not lock_file:
         sys.exit(0)  # Another instance is running
 
@@ -501,10 +505,10 @@ def main():
         app.run()
     finally:
         # Clean up lock file
-        if lock_file:
+        if lock_file and lock_file_path:
             try:
                 lock_file.close()
-                os.unlink('/tmp/witticism.lock')  # nosec B108
+                os.unlink(lock_file_path)  # nosec B108
             except OSError:
                 pass
 
