@@ -80,6 +80,7 @@ class WhisperXEngine:
         self.progress_callback = None
         self.loading_thread = None
         self.loading_cancelled = False
+        self.loading_error = None  # Track errors from loading thread
 
         # Model fallback support
         self.available_models = ["tiny", "tiny.en", "base", "base.en", "small", "small.en"]
@@ -175,6 +176,7 @@ class WhisperXEngine:
         """
         self.progress_callback = progress_callback
         self.loading_cancelled = False
+        self.loading_error = None  # Track errors from loading thread
 
         if timeout and timeout > 0:
             # Load with timeout in separate thread
@@ -182,6 +184,12 @@ class WhisperXEngine:
             self.loading_thread.daemon = True
             self.loading_thread.start()
             self.loading_thread.join(timeout)
+
+            # Check if loading failed with an error
+            if self.loading_error is not None:
+                error_to_raise = self.loading_error
+                self.loading_error = None
+                raise error_to_raise
 
             if self.loading_thread.is_alive():
                 self.loading_cancelled = True
@@ -216,7 +224,7 @@ class WhisperXEngine:
         except Exception as e:
             if not self.loading_cancelled:
                 logger.error(f"[WHISPERX_ENGINE] LOADING_FAILED: model loading failed - {e}")
-                raise
+                self.loading_error = e  # Store error for main thread to raise
 
     def _load_models_sync(self):
         """Synchronous model loading with progress updates."""
