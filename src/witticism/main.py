@@ -192,13 +192,17 @@ class WitticismApp:
 
             # CRITICAL: Create system tray EARLY for startup notifications
             # This must happen before any risky operations so users can see error messages
-            logger.info("[WITTICISM] TRAY_EARLY_INIT: creating system tray for startup notifications")
-            from witticism.ui.system_tray import SystemTrayApp
-            self.tray_app = SystemTrayApp()
-            # Set basic configuration access for early notifications
-            if self.config_manager:
-                self.tray_app.config_manager = self.config_manager
-            logger.info("[WITTICISM] TRAY_EARLY_READY: system tray available for startup error notifications")
+            # Only create if it doesn't already exist (to avoid duplicate icons on retry)
+            if not self.tray_app:
+                logger.info("[WITTICISM] TRAY_EARLY_INIT: creating system tray for startup notifications")
+                from witticism.ui.system_tray import SystemTrayApp
+                self.tray_app = SystemTrayApp()
+                # Set basic configuration access for early notifications
+                if self.config_manager:
+                    self.tray_app.config_manager = self.config_manager
+                logger.info("[WITTICISM] TRAY_EARLY_READY: system tray available for startup error notifications")
+            else:
+                logger.info("[WITTICISM] TRAY_REUSE: reusing existing system tray instance")
 
             # Initialize WhisperX engine
             model_size = self.args.model or self.config_manager.get("model.size", "base")
