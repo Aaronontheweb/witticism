@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2025-11-19
+
+### 🔧 Fixed
+
+#### Critical Dependency Compatibility
+- **Fixed torchaudio 2.9+ incompatibility** - Pinned torchaudio to <2.9.0 to prevent WhisperX model loading failures ([#98](https://github.com/Aaronontheweb/witticism/pull/98))
+- Torchaudio 2.9.0+ removed the `AudioMetaData` attribute that WhisperX depends on, causing model loading to fail
+- Users upgrading to latest PyTorch packages would experience zero text output despite microphone input being detected
+- References upstream WhisperX issue: https://github.com/m-bain/whisperX/issues/1270
+
+#### Logging System
+- **Fixed logging path expansion** - Logging now works correctly with tilde (~) paths in configuration ([#98](https://github.com/Aaronontheweb/witticism/pull/98))
+- **Enabled default file logging** - Changed default log file from `None` to platformdirs-based path (`~/.local/share/witticism/debug.log`)
+- Debug logs are now written by default, making troubleshooting significantly easier
+- Path expansion uses `.expanduser()` to properly handle Unix home directory shortcuts
+
+#### Error Handling & Diagnostics
+- **Fixed silent model loading failures** - Thread exceptions during model loading are now properly propagated to caller ([#98](https://github.com/Aaronontheweb/witticism/pull/98))
+- Application now fails fast with clear error messages instead of appearing to start successfully when models fail to load
+- Added `loading_error` instance variable to track failures from daemon threads
+- Prevents confusing situations where app appears to work but produces no transcription output
+
+#### User Interface
+- **Fixed duplicate system tray icons** - Resolved issue where CUDA fallback retry created second tray icon ([#98](https://github.com/Aaronontheweb/witticism/pull/98))
+- System tray instance is now reused when CUDA initialization requires CPU fallback
+- Users with older GPUs or CUDA compatibility issues no longer see duplicate tray icons
+
+### 📊 Impact
+This patch release addresses critical bugs discovered during user troubleshooting that prevented the application from functioning correctly. Key fixes include:
+- Text output now works reliably with latest PyTorch/torchaudio versions
+- Debugging is significantly easier with working default logging
+- Clear error messages replace silent failures during model loading
+- Cleaner UI experience for users requiring CUDA fallback to CPU mode
+
 ## [0.7.0] - 2025-11-17
 
 ### 🔧 Fixed
@@ -447,8 +481,9 @@ This release completes the foundational observability and recovery systems that 
 - Audio device selection
 - Configuration persistence
 
-[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/0.7.0...HEAD
-[0.7.0]: https://github.com/Aaronontheweb/witticism/compare/0.6.2...0.7.0
+[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/Aaronontheweb/witticism/compare/v0.7.0...v0.7.1
+[0.7.0]: https://github.com/Aaronontheweb/witticism/compare/0.6.2...v0.7.0
 [0.6.2]: https://github.com/Aaronontheweb/witticism/compare/0.6.1...0.6.2
 [0.6.1]: https://github.com/Aaronontheweb/witticism/compare/0.6.0...0.6.1
 [0.6.0]: https://github.com/Aaronontheweb/witticism/compare/v0.6.0-beta1...0.6.0
