@@ -153,7 +153,7 @@ class WitticismApp:
         log_level = args.log_level or self.config_manager.get("logging.level", "INFO")
         log_file = None
         if self.config_manager.get("logging.file"):
-            log_file = Path(self.config_manager.get("logging.file"))
+            log_file = Path(self.config_manager.get("logging.file")).expanduser()
         setup_logging(level=log_level, log_file=log_file)
 
         logger.info(f"[WITTICISM] STARTUP: version={witticism.__version__}, args={vars(args)}")
