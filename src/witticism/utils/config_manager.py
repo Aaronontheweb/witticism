@@ -16,6 +16,10 @@ class ConfigManager:
         self.config_dir = Path(platformdirs.user_config_dir(app_name))
         self.config_file = self.config_dir / "config.json"
 
+        # Get platform-specific data directory for logs
+        self.data_dir = Path(platformdirs.user_data_dir(app_name))
+        self.default_log_file = self.data_dir / "debug.log"
+
         # Default configuration
         self.default_config = {
             "model": {
@@ -54,7 +58,7 @@ class ConfigManager:
             },
             "logging": {
                 "level": "INFO",
-                "file": None,
+                "file": str(self.default_log_file),
                 "max_size": 10485760,  # 10MB
                 "backup_count": 3
             }
