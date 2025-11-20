@@ -162,10 +162,25 @@ fi
 if [ "$WITTICISM_CPU_ONLY" = "1" ]; then
     echo "💻 CPU-only mode forced via environment variable"
     INDEX_URL="https://download.pytorch.org/whl/cpu"
+    PYTORCH_CONSTRAINT=""
 elif nvidia-smi &> /dev/null; then
     CUDA_VERSION=$(nvidia-smi | grep "CUDA Version" | sed 's/.*CUDA Version: \([0-9]*\.[0-9]*\).*/\1/')
-    echo "🎮 GPU detected with CUDA $CUDA_VERSION"
-    
+
+    # Detect GPU compute capability for PyTorch compatibility
+    COMPUTE_CAP=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -1)
+    GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)
+    echo "🎮 GPU detected: $GPU_NAME (Compute Capability $COMPUTE_CAP, CUDA $CUDA_VERSION)"
+
+    # PyTorch 2.8+ dropped support for Pascal GPUs (compute capability 6.x, GTX 10-series)
+    # We need to pin PyTorch <2.8.0 for these older GPUs
+    MAJOR_CAP=$(echo "$COMPUTE_CAP" | cut -d. -f1)
+    if [ "$MAJOR_CAP" -eq 6 ]; then
+        echo "  ⚠️  Pascal GPU detected - pinning PyTorch <2.8.0 for compatibility"
+        PYTORCH_CONSTRAINT="torch<2.8.0"
+    else
+        PYTORCH_CONSTRAINT=""
+    fi
+
     if [[ $(echo "$CUDA_VERSION >= 12.1" | bc) -eq 1 ]]; then
         INDEX_URL="https://download.pytorch.org/whl/cu121"
     elif [[ $(echo "$CUDA_VERSION >= 11.8" | bc) -eq 1 ]]; then
@@ -299,6 +314,7 @@ SLEEPHOOK
 else
     echo "💻 No GPU detected - using CPU version"
     INDEX_URL="https://download.pytorch.org/whl/cpu"
+    PYTORCH_CONSTRAINT=""
 fi
 
 # 3. Install/Upgrade Witticism (smart upgrade)
@@ -323,12 +339,12 @@ if pipx list | grep -q "package witticism"; then
         PYTORCH_VERSION="$PYTORCH_CHECK"
         echo "  Current PyTorch version: $PYTORCH_VERSION"
         
-        # Check if PyTorch version is compatible (>=2.0.0,<2.4.0)
+        # Check if PyTorch version is compatible (>=2.0.0,<2.8.0)
         if python3 -c "
 import sys
 version = '$PYTORCH_VERSION'.split('+')[0]  # Remove +cu118 suffix if present
 major, minor = map(int, version.split('.')[:2])
-if major < 2 or (major == 2 and minor >= 4):
+if major < 2 or (major == 2 and minor >= 8):
     sys.exit(1)
 "; then
             echo "  PyTorch version is compatible"
@@ -356,15 +372,27 @@ except:
         echo "  📦 New version available: $LATEST_VERSION"
         echo "🔄 Upgrading Witticism (preserving compatible PyTorch)..."
         echo "⏳ This may take several minutes depending on what needs updating..."
-        pipx upgrade witticism --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple"
+        if [ -n "$PYTORCH_CONSTRAINT" ]; then
+            pipx upgrade witticism --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple '$PYTORCH_CONSTRAINT'"
+        else
+            pipx upgrade witticism --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple"
+        fi
     elif [ "$NEEDS_REINSTALL" = true ]; then
         echo "🔄 Reinstalling due to PyTorch compatibility..."
         echo "⏳ This may take several minutes as PyTorch needs to be updated"
         if [ -n "$VERSION" ]; then
             echo "   Installing specific version: $VERSION"
-            pipx install --force "witticism==$VERSION" --verbose --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple --verbose"
+            if [ -n "$PYTORCH_CONSTRAINT" ]; then
+                pipx install --force "witticism==$VERSION" --verbose --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple --verbose '$PYTORCH_CONSTRAINT'"
+            else
+                pipx install --force "witticism==$VERSION" --verbose --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple --verbose"
+            fi
         else
-            pipx install --force witticism --verbose --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple --verbose"
+            if [ -n "$PYTORCH_CONSTRAINT" ]; then
+                pipx install --force witticism --verbose --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple --verbose '$PYTORCH_CONSTRAINT'"
+            else
+                pipx install --force witticism --verbose --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple --verbose"
+            fi
         fi
     else
         echo "✓ Witticism is up to date with compatible PyTorch"
@@ -375,9 +403,17 @@ else
     echo ""
     if [ -n "$VERSION" ]; then
         echo "   Installing specific version: $VERSION"
-        pipx install "witticism==$VERSION" --verbose --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple --verbose"
+        if [ -n "$PYTORCH_CONSTRAINT" ]; then
+            pipx install "witticism==$VERSION" --verbose --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple --verbose '$PYTORCH_CONSTRAINT'"
+        else
+            pipx install "witticism==$VERSION" --verbose --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple --verbose"
+        fi
     else
-        pipx install witticism --verbose --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple --verbose"
+        if [ -n "$PYTORCH_CONSTRAINT" ]; then
+            pipx install witticism --verbose --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple --verbose '$PYTORCH_CONSTRAINT'"
+        else
+            pipx install witticism --verbose --pip-args="--index-url $INDEX_URL --extra-index-url https://pypi.org/simple --verbose"
+        fi
     fi
 fi
 
