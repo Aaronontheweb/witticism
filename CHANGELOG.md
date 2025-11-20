@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2] - 2025-11-20
+
+### 🔧 Fixed
+
+#### Pascal GPU Compatibility (GTX 10-series)
+- **Fixed PyTorch 2.8+ incompatibility with Pascal GPUs** - Pinned PyTorch to <2.8.0 to maintain compatibility with GTX 10-series GPUs ([#100](https://github.com/Aaronontheweb/witticism/pull/100))
+- PyTorch 2.8.0+ dropped support for Pascal architecture (compute capability 6.x), affecting GTX 1050/1060/1070/1080/1080 Ti
+- Users with these GPUs were experiencing silent fallback to CPU mode with 10x+ performance degradation (14s vs <2s for large model inference)
+- Install script now automatically detects Pascal GPUs and pins PyTorch <2.8.0 during installation
+- Future GPUs (Volta+, compute capability 7.0+) remain unaffected and can use newer PyTorch versions when ready to upgrade
+
+#### cuDNN Library Loading
+- **Fixed cuDNN library loading crashes in pipx environments** - Added preloading of cuDNN libraries to prevent runtime crashes ([#100](https://github.com/Aaronontheweb/witticism/pull/100))
+- PyTorch bundles cuDNN libraries but doesn't add them to dynamic linker search path, causing "Unable to load libcudnn_cnn.so" errors
+- Application would crash during transcription when cuDNN libraries couldn't be located
+- Solution preloads all cuDNN libraries using ctypes.CDLL with RTLD_GLOBAL before PyTorch imports them
+- Particularly critical for pipx installations where libraries are in isolated virtual environments
+
+### 📊 Impact
+This patch release addresses critical GPU compatibility issues that prevented Pascal GPU users from benefiting from GPU acceleration. Key fixes include:
+- Restored GPU acceleration for all GTX 10-series users (previously falling back to CPU)
+- Eliminated transcription crashes caused by missing cuDNN libraries in pipx environments
+- Automatic detection and configuration during installation ensures users get optimal performance
+- 10x+ performance improvement for affected users by maintaining GPU acceleration
+
 ## [0.7.1] - 2025-11-19
 
 ### 🔧 Fixed
@@ -481,7 +506,8 @@ This release completes the foundational observability and recovery systems that 
 - Audio device selection
 - Configuration persistence
 
-[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/Aaronontheweb/witticism/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/Aaronontheweb/witticism/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/Aaronontheweb/witticism/compare/0.6.2...v0.7.0
 [0.6.2]: https://github.com/Aaronontheweb/witticism/compare/0.6.1...0.6.2
