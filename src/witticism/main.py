@@ -8,6 +8,58 @@ import os
 import platform
 from pathlib import Path
 
+def _preload_cudnn_libraries():
+    """
+    Preload PyTorch's bundled cuDNN libraries before torch imports them.
+
+    PyTorch bundles cuDNN but doesn't automatically make it discoverable by the
+    dynamic linker, causing "Unable to load libcudnn_cnn.so" errors that lead to
+    crashes during transcription. This function finds and explicitly loads the
+    cuDNN libraries using ctypes before PyTorch is imported.
+
+    This is particularly important for pipx installations where libraries are in
+    isolated virtual environments not in the system library search path.
+    """
+    try:
+        import ctypes
+        import site
+
+        # Find site-packages directory - works for both pipx and regular installs
+        site_packages = site.getsitepackages()
+
+        for site_pkg in site_packages:
+            cudnn_lib_path = Path(site_pkg) / 'nvidia' / 'cudnn' / 'lib'
+            if cudnn_lib_path.exists():
+                # Try to preload the main cuDNN libraries
+                # Order matters - load dependencies first
+                lib_names = [
+                    'libcudnn_ops.so.9',
+                    'libcudnn_graph.so.9',
+                    'libcudnn_engines_runtime_compiled.so.9',
+                    'libcudnn_engines_precompiled.so.9',
+                    'libcudnn_heuristic.so.9',
+                    'libcudnn_cnn.so.9',
+                    'libcudnn.so.9'
+                ]
+
+                for lib_name in lib_names:
+                    lib_path = cudnn_lib_path / lib_name
+                    if lib_path.exists():
+                        try:
+                            ctypes.CDLL(str(lib_path), mode=ctypes.RTLD_GLOBAL)
+                        except OSError:
+                            # Library might have dependencies, continue anyway
+                            pass
+
+                return True
+        return False
+    except Exception:
+        # Silently fail - if we can't preload, torch will try to find it itself
+        return False
+
+# Preload cuDNN libraries before any torch imports
+_preload_cudnn_libraries()
+
 def _is_headless_environment():
     """Detect if we're running in a headless/display-less environment"""
     return (

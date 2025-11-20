@@ -25,7 +25,7 @@ classifiers = [
 ]
 dependencies = [
     "whisperx>=3.1.0",
-    "torch>=2.0.0",
+    "torch>=2.0.0,<2.8.0",  # Pin to <2.8.0 for Pascal GPU (GTX 10-series) support - PyTorch 2.8+ dropped sm_61
     "torchaudio>=2.0.0,<2.9.0",  # Pin to <2.9.0 due to AudioMetaData removal (whisperX incompatibility)
     "PyQt5>=5.15.0",
     "pyaudio>=0.2.11",
