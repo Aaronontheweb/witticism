@@ -3,11 +3,26 @@ import pyaudio
 import numpy as np
 import webrtcvad
 from queue import Queue
-from threading import Thread, Event
+from threading import Thread, Event, Lock
 from typing import Optional, Callable, List
 import time
 
 logger = logging.getLogger(__name__)
+
+# PortAudio error codes that indicate recoverable vs fatal errors
+RECOVERABLE_ERRORS = {
+    -9981,  # paInputOverflowed
+    -9980,  # paOutputUnderflowed
+}
+
+FATAL_ERRORS = {
+    -9999,  # paUnanticipatedHostError
+    -9998,  # paInternalError
+    -9996,  # paDeviceUnavailable
+    -9995,  # paInvalidChannelCount
+    -9994,  # paInvalidSampleRate
+    -9993,  # paInvalidDevice
+}
 
 
 class AudioCapture:
@@ -49,6 +64,15 @@ class AudioCapture:
         # Callbacks
         self.on_speech_start = None
         self.on_speech_end = None
+        self.on_error: Optional[Callable[[Exception, bool], None]] = None  # (error, is_fatal)
+
+        # Error state tracking
+        self._error_lock = Lock()
+        self._error_state = False
+        self._last_error: Optional[Exception] = None
+        self._consecutive_errors = 0
+        self._max_consecutive_errors = 3  # After this many errors, consider it fatal
+        self._last_device_index: Optional[int] = None
 
         logger.info(f"AudioCapture initialized: {sample_rate}Hz, {channels} channel(s)")
 
@@ -65,6 +89,87 @@ class AudioCapture:
                 })
         return devices
 
+    def _is_fatal_error(self, error: Exception) -> bool:
+        """Determine if an error is fatal (requires full recovery) or transient."""
+        error_str = str(error)
+        # Check for known fatal error codes
+        for code in FATAL_ERRORS:
+            if str(code) in error_str:
+                return True
+        # Check for consecutive errors threshold
+        return self._consecutive_errors >= self._max_consecutive_errors
+
+    def _handle_capture_error(self, error: Exception) -> bool:
+        """
+        Handle an error that occurred during capture.
+        Returns True if capture should continue, False if it should stop.
+        """
+        with self._error_lock:
+            self._consecutive_errors += 1
+            self._last_error = error
+            is_fatal = self._is_fatal_error(error)
+
+            if is_fatal:
+                self._error_state = True
+                logger.error(f"Fatal audio capture error: {error}")
+            else:
+                logger.warning(f"Transient audio capture error ({self._consecutive_errors}/{self._max_consecutive_errors}): {error}")
+
+        # Notify callback
+        if self.on_error:
+            try:
+                self.on_error(error, is_fatal)
+            except Exception as cb_error:
+                logger.error(f"Error in on_error callback: {cb_error}")
+
+        return not is_fatal
+
+    def _reset_error_state(self) -> None:
+        """Reset error tracking after successful operation."""
+        with self._error_lock:
+            self._consecutive_errors = 0
+            self._error_state = False
+            self._last_error = None
+
+    def _safe_close_stream(self) -> None:
+        """Safely close the audio stream, handling any errors."""
+        if self.stream:
+            try:
+                if self.stream.is_active():
+                    self.stream.stop_stream()
+                self.stream.close()
+            except Exception as e:
+                logger.warning(f"Error closing stream: {e}")
+            finally:
+                self.stream = None
+
+    def _reinitialize_audio(self) -> bool:
+        """Reinitialize PyAudio after a fatal error. Returns True on success."""
+        logger.info("Reinitializing PyAudio...")
+        try:
+            self._safe_close_stream()
+            self.audio.terminate()
+            time.sleep(0.5)  # Give the system time to release resources
+            self.audio = pyaudio.PyAudio()
+            self._reset_error_state()
+            logger.info("PyAudio reinitialized successfully")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to reinitialize PyAudio: {e}")
+            return False
+
+    @property
+    def has_error(self) -> bool:
+        """Check if the capture is in an error state."""
+        with self._error_lock:
+            return self._error_state
+
+    @property
+    def last_error(self) -> Optional[Exception]:
+        """Get the last error that occurred."""
+        with self._error_lock:
+            return self._last_error
+
     def start_recording(
         self,
         device_index: Optional[int] = None,
@@ -73,6 +178,14 @@ class AudioCapture:
         if self.is_recording:
             logger.warning("Already recording")
             return
+
+        # If in error state, try to recover first
+        if self.has_error:
+            logger.warning("Audio capture in error state, attempting recovery...")
+            if not self._reinitialize_audio():
+                raise RuntimeError("Cannot start recording: audio system in error state and recovery failed")
+
+        self._last_device_index = device_index
 
         try:
             # Open audio stream
@@ -88,6 +201,7 @@ class AudioCapture:
             self.is_recording = True
             self.stop_event.clear()
             self.recording_buffer = []
+            self._reset_error_state()  # Clear any previous errors on successful start
 
             # Start capture thread
             self.capture_thread = Thread(
@@ -100,6 +214,7 @@ class AudioCapture:
 
         except Exception as e:
             logger.error(f"Failed to start recording: {e}")
+            self._handle_capture_error(e)
             raise
 
     def stop_recording(self) -> np.ndarray:
@@ -111,11 +226,7 @@ class AudioCapture:
         if self.capture_thread:
             self.capture_thread.join(timeout=2.0)
 
-        if self.stream:
-            self.stream.stop_stream()
-            self.stream.close()
-            self.stream = None
-
+        self._safe_close_stream()
         self.is_recording = False
 
         # Convert buffer to numpy array
@@ -140,6 +251,9 @@ class AudioCapture:
                         self.chunk_size,
                         exception_on_overflow=False
                     )
+
+                    # Reset error count on successful read
+                    self._reset_error_state()
 
                     # Convert to numpy
                     audio_np = np.frombuffer(audio_chunk, dtype=np.int16)
@@ -188,9 +302,18 @@ class AudioCapture:
                     # Also add frames to buffer for continuous capture
                     if is_speech:
                         speech_frames.append(audio_np)
+                else:
+                    # Stream not active, wait briefly before checking again
+                    time.sleep(0.01)
 
             except Exception as e:
-                logger.error(f"Error in capture loop: {e}")
+                should_continue = self._handle_capture_error(e)
+                if not should_continue:
+                    logger.error("Fatal error in capture loop, stopping capture")
+                    self.stop_event.set()
+                    break
+                # Small delay before retry on transient errors
+                time.sleep(0.1)
 
     def set_vad_callbacks(
         self,
@@ -277,6 +400,14 @@ class ContinuousCapture(AudioCapture):
         if self.is_recording:
             return
 
+        # If in error state, try to recover first
+        if self.has_error:
+            logger.warning("Audio capture in error state, attempting recovery...")
+            if not self._reinitialize_audio():
+                raise RuntimeError("Cannot start recording: audio system in error state and recovery failed")
+
+        self._last_device_index = device_index
+
         try:
             # Open audio stream
             self.stream = self.audio.open(
@@ -291,6 +422,7 @@ class ContinuousCapture(AudioCapture):
             self.is_recording = True
             self.stop_event.clear()
             self.recording_buffer = []
+            self._reset_error_state()  # Clear any previous errors on successful start
 
             # Start continuous capture thread
             self.capture_thread = Thread(
@@ -302,6 +434,7 @@ class ContinuousCapture(AudioCapture):
 
         except Exception as e:
             logger.error(f"Failed to start continuous recording: {e}")
+            self._handle_capture_error(e)
             raise
 
     def _continuous_capture_loop(self) -> None:
@@ -314,6 +447,9 @@ class ContinuousCapture(AudioCapture):
                         self.chunk_size,
                         exception_on_overflow=False
                     )
+
+                    # Reset error count on successful read
+                    self._reset_error_state()
 
                     # Convert to numpy
                     audio_np = np.frombuffer(audio_chunk, dtype=np.int16)
@@ -336,6 +472,16 @@ class ContinuousCapture(AudioCapture):
 
                             self.chunk_buffer = []
                             self.last_chunk_time = current_time
+                else:
+                    # Stream not active, wait briefly before checking again
+                    time.sleep(0.01)
 
             except Exception as e:
-                logger.error(f"Error in continuous capture loop: {e}")
+                should_continue = self._handle_capture_error(e)
+                if not should_continue:
+                    logger.error("Fatal error in continuous capture loop, stopping capture")
+                    self.continuous_active = False
+                    self.stop_event.set()
+                    break
+                # Small delay before retry on transient errors
+                time.sleep(0.1)
