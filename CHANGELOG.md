@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.3] - 2025-12-11
+
+### 🔧 Fixed
+
+#### Audio Capture Error Resilience
+- **Enhanced PortAudio error handling** - Added intelligent error classification and automatic recovery for audio capture failures ([#103](https://github.com/Aaronontheweb/witticism/pull/103))
+- **Automatic PyAudio reinitialization** - System now automatically recovers from fatal PortAudio errors (e.g., `-9999` paUnanticipatedHostError)
+- **Graceful error state management** - Consecutive error threshold detection prevents infinite retry loops
+- **Safe stream cleanup** - Handles corrupted audio state gracefully instead of crashing
+- Application now survives audio device disconnections and host errors during recording
+- Prevents unhandled exceptions when PortAudio encounters hardware failures
+
+### 📊 Impact
+This patch release improves application stability when dealing with audio hardware issues. Key improvements include:
+- Application no longer crashes when audio devices are disconnected during recording
+- Automatic recovery from transient audio errors without user intervention
+- Better error reporting through new `on_error` callback mechanism
+- Graceful degradation when audio system encounters fatal errors
+
 ## [0.7.2] - 2025-11-20
 
 ### 🔧 Fixed
@@ -506,7 +525,8 @@ This release completes the foundational observability and recovery systems that 
 - Audio device selection
 - Configuration persistence
 
-[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/v0.7.3...HEAD
+[0.7.3]: https://github.com/Aaronontheweb/witticism/compare/v0.7.1...v0.7.3
 [0.7.2]: https://github.com/Aaronontheweb/witticism/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/Aaronontheweb/witticism/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/Aaronontheweb/witticism/compare/0.6.2...v0.7.0
