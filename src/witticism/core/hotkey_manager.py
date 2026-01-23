@@ -1,12 +1,8 @@
 import logging
-import threading
 from pynput import keyboard
 from typing import Optional, Callable
 
 logger = logging.getLogger(__name__)
-
-# Default debounce delay in seconds (30ms as suggested in #95)
-DEFAULT_PTT_DEBOUNCE_MS = 30
 
 
 class HotkeyManager:
@@ -36,15 +32,8 @@ class HotkeyManager:
         self.mode = "push_to_talk"  # "push_to_talk" or "toggle"
         self.dictation_active = False
 
-        # Debounce support (#95) - helps with mouse buttons that send rapid key up/down events
-        self.ptt_debounce_ms = DEFAULT_PTT_DEBOUNCE_MS
-        if config_manager:
-            self.ptt_debounce_ms = config_manager.get("hotkeys.ptt_debounce_ms", DEFAULT_PTT_DEBOUNCE_MS)
-        self._ptt_stop_timer: Optional[threading.Timer] = None
-        self._ptt_timer_lock = threading.Lock()
-
         ptt_key_name = getattr(self.ptt_key, 'name', str(self.ptt_key))
-        logger.info(f"[HOTKEY_MANAGER] INIT: mode={self.mode}, ptt_key={ptt_key_name}, debounce={self.ptt_debounce_ms}ms")
+        logger.info(f"[HOTKEY_MANAGER] INIT: mode={self.mode}, ptt_key={ptt_key_name}")
 
     def set_callbacks(
         self,
@@ -73,9 +62,6 @@ class HotkeyManager:
         logger.info("[HOTKEY_MANAGER] STARTED: keyboard listener active")
 
     def stop(self):
-        # Cancel any pending debounce timer
-        self._cancel_ptt_stop_timer()
-
         if self.listener:
             self.listener.stop()
             self.listener = None
@@ -86,9 +72,6 @@ class HotkeyManager:
             # Handle F9 based on mode
             if key == self.ptt_key:
                 if self.mode == "push_to_talk":
-                    # Cancel any pending stop timer (#95 debounce)
-                    self._cancel_ptt_stop_timer()
-
                     # Push-to-talk mode
                     if not self.ptt_active:
                         self.ptt_active = True
@@ -122,16 +105,13 @@ class HotkeyManager:
             # Handle F9 based on mode
             if key == self.ptt_key:
                 if self.mode == "push_to_talk":
-                    # Push-to-talk mode - stop recording on release (with debounce)
+                    # Push-to-talk mode - stop recording on release
                     if self.ptt_active:
+                        self.ptt_active = False
                         ptt_key_name = getattr(self.ptt_key, 'name', str(self.ptt_key))
-                        if self.ptt_debounce_ms > 0:
-                            # Use debounce timer (#95) - helps with mouse buttons sending rapid events
-                            logger.debug(f"[HOTKEY_MANAGER] PTT_RELEASE: {ptt_key_name} released - scheduling stop with {self.ptt_debounce_ms}ms debounce")
-                            self._schedule_ptt_stop()
-                        else:
-                            # No debounce - immediate stop
-                            self._do_ptt_stop()
+                        logger.debug(f"[HOTKEY_MANAGER] PTT_STOP: {ptt_key_name} released - recording stopped")
+                        if self.on_push_to_talk_stop:
+                            self.on_push_to_talk_stop()
                 elif self.mode == "toggle":
                     # Toggle mode - toggle dictation state
                     self.dictation_active = not self.dictation_active
@@ -145,39 +125,6 @@ class HotkeyManager:
 
         except Exception as e:
             logger.error(f"[HOTKEY_MANAGER] KEY_RELEASE_ERROR: error in key release handler - {e}")
-
-    def _schedule_ptt_stop(self):
-        """Schedule a debounced PTT stop (#95)."""
-        with self._ptt_timer_lock:
-            # Cancel any existing timer
-            if self._ptt_stop_timer is not None:
-                self._ptt_stop_timer.cancel()
-
-            # Schedule new timer
-            delay_seconds = self.ptt_debounce_ms / 1000.0
-            self._ptt_stop_timer = threading.Timer(delay_seconds, self._do_ptt_stop)
-            self._ptt_stop_timer.daemon = True
-            self._ptt_stop_timer.start()
-
-    def _cancel_ptt_stop_timer(self):
-        """Cancel any pending PTT stop timer (#95)."""
-        with self._ptt_timer_lock:
-            if self._ptt_stop_timer is not None:
-                self._ptt_stop_timer.cancel()
-                self._ptt_stop_timer = None
-                logger.debug("[HOTKEY_MANAGER] PTT_DEBOUNCE: cancelled pending stop - key pressed again")
-
-    def _do_ptt_stop(self):
-        """Actually perform the PTT stop."""
-        with self._ptt_timer_lock:
-            self._ptt_stop_timer = None
-
-        if self.ptt_active:
-            self.ptt_active = False
-            ptt_key_name = getattr(self.ptt_key, 'name', str(self.ptt_key))
-            logger.debug(f"[HOTKEY_MANAGER] PTT_STOP: {ptt_key_name} - recording stopped")
-            if self.on_push_to_talk_stop:
-                self.on_push_to_talk_stop()
 
     def _is_combo_pressed(self, *keys):
         for key in keys:
