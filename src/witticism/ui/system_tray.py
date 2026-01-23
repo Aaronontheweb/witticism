@@ -1,5 +1,6 @@
 import logging
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from PyQt5.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QAction, QMessageBox
 from PyQt5.QtCore import pyqtSignal, QThread, Qt, QTimer
 from PyQt5.QtGui import QIcon, QPixmap
@@ -11,26 +12,42 @@ from witticism.ui.cuda_health_dialog import CudaHealthDialog
 
 logger = logging.getLogger(__name__)
 
+# Default timeout for transcription operations (in seconds)
+TRANSCRIPTION_TIMEOUT = 60
+
 
 class TranscriptionWorker(QThread):
     transcription_complete = pyqtSignal(str)
     transcription_error = pyqtSignal(str)
+    transcription_timeout = pyqtSignal()
     status_update = pyqtSignal(str)
 
-    def __init__(self, engine, audio_data):
+    def __init__(self, engine, audio_data, timeout=TRANSCRIPTION_TIMEOUT):
         super().__init__()
         self.engine = engine
         self.audio_data = audio_data
+        self.timeout = timeout
 
     def run(self):
         try:
             self.status_update.emit("Transcribing...")
-            result = self.engine.transcribe(self.audio_data)
-            text = self.engine.format_result(result)
-            self.transcription_complete.emit(text)
+            # Use ThreadPoolExecutor for timeout protection (#106)
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(self._do_transcription)
+                try:
+                    text = future.result(timeout=self.timeout)
+                    self.transcription_complete.emit(text)
+                except FuturesTimeoutError:
+                    logger.error(f"[TRANSCRIPTION] TIMEOUT: transcription exceeded {self.timeout}s timeout")
+                    self.transcription_timeout.emit()
         except Exception as e:
             logger.error(f"Transcription error: {e}")
             self.transcription_error.emit(str(e))
+
+    def _do_transcription(self) -> str:
+        """Perform the actual transcription work (can be interrupted by timeout)."""
+        result = self.engine.transcribe(self.audio_data)
+        return self.engine.format_result(result)
 
 
 class SystemTrayApp(QSystemTrayIcon):
@@ -50,6 +67,12 @@ class SystemTrayApp(QSystemTrayIcon):
         self.is_dictating = False  # For toggle mode
         self.mode = "push_to_talk"  # "push_to_talk" or "toggle"
         self.cuda_error_shown = False  # Track if we've shown CUDA error notification
+
+        # No-speech detection tracking (#107, #109)
+        self.consecutive_no_speech_count = 0
+        self.no_speech_threshold = 3  # Show notification after this many consecutive no-speech events
+        self.no_speech_notification_shown = False
+        self.no_speech_cooldown_timer = None
 
         self.init_ui()
         self.set_status("Ready")
@@ -430,14 +453,20 @@ class SystemTrayApp(QSystemTrayIcon):
         self.worker = TranscriptionWorker(self.engine, audio_float)
         self.worker.transcription_complete.connect(self.on_transcription_complete)
         self.worker.transcription_error.connect(self.on_transcription_error)
+        self.worker.transcription_timeout.connect(self.on_transcription_timeout)
         self.worker.status_update.connect(self.set_status)
         self.worker.start()
 
     def on_transcription_complete(self, text):
         self.set_status("Ready")
 
-        if text and self.output_manager:
-            self.output_manager.output_text(text)
+        # Track no-speech events (#107, #109)
+        if not text or not text.strip():
+            self._handle_no_speech_event()
+        else:
+            self._reset_no_speech_counter()
+            if self.output_manager:
+                self.output_manager.output_text(text)
 
     def on_transcription_error(self, error):
         self.set_status("Error")
@@ -455,6 +484,83 @@ class SystemTrayApp(QSystemTrayIcon):
 
                 # Update status to reflect CPU mode
                 self.set_status("Ready")
+
+    def on_transcription_timeout(self):
+        """Handle transcription timeout (#106)."""
+        logger.warning("[TRANSCRIPTION] TIMEOUT_HANDLER: transcription operation timed out")
+        self.set_status("Transcription timed out")
+
+        if self.supportsMessages():
+            self.showMessage(
+                "Transcription Timeout",
+                "Transcription took too long and was cancelled.\n"
+                "This may indicate a processing issue.\n"
+                "Try recording a shorter clip.",
+                QSystemTrayIcon.Warning,
+                5000
+            )
+
+        # Reset to ready after a brief delay
+        QTimer.singleShot(3000, lambda: self.set_status("Ready"))
+
+    def _handle_no_speech_event(self):
+        """Track and handle no-speech detection events (#107, #109)."""
+        self.consecutive_no_speech_count += 1
+        logger.info(f"[TRANSCRIPTION] NO_SPEECH: no speech detected "
+                   f"(consecutive count: {self.consecutive_no_speech_count}/{self.no_speech_threshold})")
+
+        # Update status to show no speech was detected
+        self.set_status("No speech detected")
+        QTimer.singleShot(2000, lambda: self.set_status("Ready") if not self.is_recording else None)
+
+        # Check if we've hit the threshold for showing a notification
+        if (self.consecutive_no_speech_count >= self.no_speech_threshold and
+                not self.no_speech_notification_shown):
+            self._show_no_speech_notification()
+
+    def _show_no_speech_notification(self):
+        """Show warning notification about persistent no-speech detection (#109)."""
+        logger.warning(f"[TRANSCRIPTION] NO_SPEECH_PERSISTENT: {self.consecutive_no_speech_count} "
+                      "consecutive recordings with no speech detected")
+
+        self.no_speech_notification_shown = True
+
+        if self.supportsMessages():
+            self.showMessage(
+                "No Speech Detected",
+                "Multiple recordings detected no speech.\n\n"
+                "Please check:\n"
+                "- Microphone is connected and selected\n"
+                "- Microphone is not muted\n"
+                "- You're speaking clearly into the mic",
+                QSystemTrayIcon.Warning,
+                8000
+            )
+
+        # Reset notification flag after cooldown (allow re-showing after 60 seconds)
+        self._reset_no_speech_notification_flag_delayed()
+
+    def _reset_no_speech_counter(self):
+        """Reset no-speech counter on successful transcription."""
+        if self.consecutive_no_speech_count > 0:
+            logger.info(f"[TRANSCRIPTION] SPEECH_DETECTED: resetting no-speech counter "
+                       f"(was {self.consecutive_no_speech_count})")
+        self.consecutive_no_speech_count = 0
+
+    def _reset_no_speech_notification_flag_delayed(self):
+        """Reset notification flag after cooldown to allow re-showing."""
+        if self.no_speech_cooldown_timer:
+            self.no_speech_cooldown_timer.stop()
+
+        self.no_speech_cooldown_timer = QTimer()
+        self.no_speech_cooldown_timer.setSingleShot(True)
+        self.no_speech_cooldown_timer.timeout.connect(self._reset_no_speech_notification_flag)
+        self.no_speech_cooldown_timer.start(60000)  # 60 second cooldown
+
+    def _reset_no_speech_notification_flag(self):
+        """Reset notification flag to allow re-showing after cooldown."""
+        self.no_speech_notification_shown = False
+        logger.debug("[TRANSCRIPTION] NO_SPEECH_COOLDOWN_EXPIRED: notification can be shown again")
 
     def show_cuda_error_notification(self):
         """Show a system tray notification about CUDA error and CPU fallback."""

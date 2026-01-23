@@ -45,3 +45,18 @@ def setup_logging(
     # Suppress some noisy loggers
     logging.getLogger("pynput").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
+
+    # Capture PyAnnote VAD warnings (important for #107 - no speech detection)
+    pyannote_logger = logging.getLogger("pyannote")
+    pyannote_logger.setLevel(logging.WARNING)
+
+    # Capture WhisperX warnings (important for transcription issues)
+    whisperx_logger = logging.getLogger("whisperx")
+    whisperx_logger.setLevel(logging.WARNING)
+
+    # Capture faster_whisper warnings
+    faster_whisper_logger = logging.getLogger("faster_whisper")
+    faster_whisper_logger.setLevel(logging.WARNING)
+
+    # Capture Python warnings to logging (helps catch VAD 'no speech found' warnings)
+    logging.captureWarnings(True)

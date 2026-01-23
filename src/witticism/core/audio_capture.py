@@ -75,6 +75,32 @@ class AudioCapture:
         self._last_device_index: Optional[int] = None
 
         logger.info(f"AudioCapture initialized: {sample_rate}Hz, {channels} channel(s)")
+        self._log_default_device_info()
+
+    def _get_device_name(self, device_index: Optional[int]) -> str:
+        """Get human-readable device name from device index."""
+        try:
+            if device_index is None:
+                default_info = self.audio.get_default_input_device_info()
+                return default_info.get('name', 'Default Device')
+            else:
+                device_info = self.audio.get_device_info_by_index(device_index)
+                return device_info.get('name', f'Device {device_index}')
+        except Exception:
+            return f"Device {device_index}" if device_index is not None else "Default Device"
+
+    def _log_default_device_info(self) -> None:
+        """Log default input device information at initialization."""
+        try:
+            default_info = self.audio.get_default_input_device_info()
+            device_name = default_info.get('name', 'Unknown')
+            device_index = default_info.get('index', -1)
+            sample_rate = default_info.get('defaultSampleRate', 'Unknown')
+            channels = default_info.get('maxInputChannels', 'Unknown')
+            logger.info(f"[AUDIO_CAPTURE] DEFAULT_DEVICE: name='{device_name}' (index={device_index}), "
+                       f"sample_rate={sample_rate}, channels={channels}")
+        except Exception as e:
+            logger.warning(f"[AUDIO_CAPTURE] DEFAULT_DEVICE_ERROR: could not get default device info - {e}")
 
     def get_audio_devices(self) -> List[dict]:
         devices = []
@@ -210,7 +236,8 @@ class AudioCapture:
             )
             self.capture_thread.start()
 
-            logger.info(f"Started recording on device {device_index}")
+            device_name = self._get_device_name(device_index)
+            logger.info(f"[AUDIO_CAPTURE] RECORDING_STARTED: device='{device_name}' (index={device_index})")
 
         except Exception as e:
             logger.error(f"Failed to start recording: {e}")
@@ -232,9 +259,10 @@ class AudioCapture:
         # Convert buffer to numpy array
         if self.recording_buffer:
             audio_data = np.concatenate(self.recording_buffer)
-            logger.info(f"Stopped recording. Captured {len(audio_data)/self.sample_rate:.2f} seconds")
+            logger.info(f"[AUDIO_CAPTURE] RECORDING_STOPPED: captured {len(audio_data)/self.sample_rate:.2f} seconds of audio")
             return audio_data
         else:
+            logger.info("[AUDIO_CAPTURE] RECORDING_STOPPED: no audio captured (empty buffer)")
             return np.array([], dtype=np.int16)
 
     def _capture_loop(self, callback: Optional[Callable]) -> None:
@@ -430,7 +458,8 @@ class ContinuousCapture(AudioCapture):
             )
             self.capture_thread.start()
 
-            logger.info(f"Started continuous recording on device {device_index}")
+            device_name = self._get_device_name(device_index)
+            logger.info(f"[AUDIO_CAPTURE] CONTINUOUS_RECORDING_STARTED: device='{device_name}' (index={device_index})")
 
         except Exception as e:
             logger.error(f"Failed to start continuous recording: {e}")

@@ -308,12 +308,25 @@ class WitticismApp:
             sample_rate = self.config_manager.get("audio.sample_rate", 16000)
             channels = self.config_manager.get("audio.channels", 1)
             vad_aggressiveness = self.config_manager.get("audio.vad_aggressiveness", 2)
-            logger.info(f"[WITTICISM] AUDIO_INIT: sample_rate={sample_rate}, channels={channels}, vad_aggressiveness={vad_aggressiveness}")
+            configured_device = self.config_manager.get("audio.device_index", None)
+            logger.info(f"[WITTICISM] AUDIO_INIT: sample_rate={sample_rate}, channels={channels}, "
+                       f"vad_aggressiveness={vad_aggressiveness}, configured_device_index={configured_device}")
             self.audio_capture = PushToTalkCapture(
                 sample_rate=sample_rate,
                 channels=channels,
                 vad_aggressiveness=vad_aggressiveness
             )
+
+            # Log available audio devices at DEBUG level (#108)
+            try:
+                devices = self.audio_capture.get_audio_devices()
+                logger.debug(f"[WITTICISM] AUDIO_DEVICES_AVAILABLE: found {len(devices)} input device(s)")
+                for device in devices:
+                    logger.debug(f"[WITTICISM] AUDIO_DEVICE: index={device['index']}, "
+                               f"name='{device['name']}', channels={device['channels']}, "
+                               f"sample_rate={device['sample_rate']}")
+            except Exception as e:
+                logger.warning(f"[WITTICISM] AUDIO_DEVICES_ERROR: could not enumerate audio devices - {e}")
 
             # Initialize transcription pipeline
             min_audio_length = self.config_manager.get("pipeline.min_audio_length", 0.5)
