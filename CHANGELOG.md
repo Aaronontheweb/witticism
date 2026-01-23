@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-01-23
+
+### 🚀 Feature Release: Transcription Resilience & Compatibility
+
+This release focuses on transcription pipeline reliability, PyTorch compatibility, and improved push-to-talk support for non-keyboard input devices.
+
+### ✨ New Features
+
+#### Push-to-Talk Debounce Support
+- **Configurable PTT debounce delay** - Mouse buttons and other input devices that send rapid key events now work reliably as push-to-talk triggers ([#114](https://github.com/Aaronontheweb/witticism/pull/114), closes [#95](https://github.com/Aaronontheweb/witticism/issues/95))
+- Default 30ms debounce coalesces rapid key up/down events into a single recording session
+- Configurable via `hotkeys.ptt_debounce_ms` in configuration file
+- Set to 0 to disable debounce for immediate response
+
+### 🔧 Fixed
+
+#### PyTorch 2.6+ Compatibility
+- **Fixed startup failures with PyTorch 2.6+** - Added omegaconf types to torch safe globals to support the new `weights_only=True` default in `torch.load()` ([#113](https://github.com/Aaronontheweb/witticism/pull/113), closes [#105](https://github.com/Aaronontheweb/witticism/issues/105))
+- **Fixed crash on suspend with missing method** - Added `is_loaded()` method to WhisperXEngine to prevent `AttributeError` when system suspend is detected ([#113](https://github.com/Aaronontheweb/witticism/pull/113), closes [#102](https://github.com/Aaronontheweb/witticism/issues/102))
+
+#### Transcription Pipeline Resilience
+- **Transcription timeout protection** - Wrapped transcription in ThreadPoolExecutor with 60-second timeout to prevent indefinite hangs ([#110](https://github.com/Aaronontheweb/witticism/pull/110), closes [#106](https://github.com/Aaronontheweb/witticism/issues/106))
+- **Improved no-speech detection** - After 3 consecutive no-speech transcriptions, displays warning notification with troubleshooting suggestions ([#110](https://github.com/Aaronontheweb/witticism/pull/110), closes [#109](https://github.com/Aaronontheweb/witticism/issues/109))
+- **VAD warning logging** - Captures third-party library warnings from pyannote, whisperx, and faster_whisper for better diagnostics ([#110](https://github.com/Aaronontheweb/witticism/pull/110), closes [#107](https://github.com/Aaronontheweb/witticism/issues/107))
+- **Audio device name logging** - Logs human-readable device names at startup instead of opaque indices for easier troubleshooting ([#110](https://github.com/Aaronontheweb/witticism/pull/110), closes [#108](https://github.com/Aaronontheweb/witticism/issues/108))
+
+### 📊 Impact
+This release significantly improves the transcription experience with better error handling, diagnostic logging, and hardware compatibility. Key improvements include:
+- Users with mouse buttons mapped to PTT can now use Witticism reliably
+- Application starts successfully with latest PyTorch versions (2.6+)
+- Transcription pipeline no longer hangs indefinitely on problematic audio
+- Better visibility into audio device configuration and transcription issues
+- Clear user notifications when no speech is detected
+
 ## [0.7.3] - 2025-12-11
 
 ### 🔧 Fixed
@@ -525,8 +559,9 @@ This release completes the foundational observability and recovery systems that 
 - Audio device selection
 - Configuration persistence
 
-[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/v0.7.3...HEAD
-[0.7.3]: https://github.com/Aaronontheweb/witticism/compare/v0.7.1...v0.7.3
+[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/Aaronontheweb/witticism/compare/v0.7.3...v0.8.0
+[0.7.3]: https://github.com/Aaronontheweb/witticism/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/Aaronontheweb/witticism/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/Aaronontheweb/witticism/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/Aaronontheweb/witticism/compare/0.6.2...v0.7.0
