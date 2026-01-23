@@ -11,18 +11,6 @@ try:
     WHISPERX_AVAILABLE = True
     logger = logging.getLogger(__name__)
     logger.info("[WHISPERX_ENGINE] LIBRARY_LOADED: WhisperX library loaded successfully")
-
-    # Fix for PyTorch 2.6+ (issue #105): Add omegaconf types to safe globals
-    # PyTorch 2.6 changed weights_only default to True, breaking WhisperX model loading
-    try:
-        from omegaconf import ListConfig, DictConfig
-        torch.serialization.add_safe_globals([ListConfig, DictConfig])
-        logger.debug("[WHISPERX_ENGINE] PYTORCH26_FIX: added omegaconf types to torch safe globals")
-    except ImportError:
-        logger.debug("[WHISPERX_ENGINE] PYTORCH26_FIX: omegaconf not available, skipping safe globals setup")
-    except AttributeError:
-        # PyTorch < 2.6 doesn't have add_safe_globals
-        logger.debug("[WHISPERX_ENGINE] PYTORCH26_FIX: torch.serialization.add_safe_globals not available (PyTorch < 2.6)")
 except ImportError:
     from . import mock_whisperx as whisperx
     WHISPERX_AVAILABLE = False
@@ -378,10 +366,6 @@ class WhisperXEngine:
     def is_loading(self) -> bool:
         """Check if models are currently loading."""
         return self.loading_thread is not None and self.loading_thread.is_alive()
-
-    def is_loaded(self) -> bool:
-        """Check if models are loaded and ready for transcription."""
-        return self.model is not None
 
     def get_loading_progress(self) -> Tuple[str, int]:
         """Get current loading status and progress percentage."""
