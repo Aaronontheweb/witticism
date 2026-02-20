@@ -12,17 +12,17 @@ try:
     logger = logging.getLogger(__name__)
     logger.info("[WHISPERX_ENGINE] LIBRARY_LOADED: WhisperX library loaded successfully")
 
-    # Fix for PyTorch 2.6+ (issue #105): Add omegaconf types to safe globals
-    # PyTorch 2.6 changed weights_only default to True, breaking WhisperX model loading
-    try:
-        from omegaconf import ListConfig, DictConfig
-        torch.serialization.add_safe_globals([ListConfig, DictConfig])
-        logger.debug("[WHISPERX_ENGINE] PYTORCH26_FIX: added omegaconf types to torch safe globals")
-    except ImportError:
-        logger.debug("[WHISPERX_ENGINE] PYTORCH26_FIX: omegaconf not available, skipping safe globals setup")
-    except AttributeError:
-        # PyTorch < 2.6 doesn't have add_safe_globals
-        logger.debug("[WHISPERX_ENGINE] PYTORCH26_FIX: torch.serialization.add_safe_globals not available (PyTorch < 2.6)")
+    # Fix for PyTorch 2.6+ (issue #105): Override weights_only default back to False
+    # PyTorch 2.6 changed weights_only default to True, breaking WhisperX/pyannote model loading.
+    # Allowlisting individual types is a losing game — the models use too many dynamic types
+    # (omegaconf, typing.Any, etc). Since we only load trusted local model checkpoints,
+    # patching torch.load to default weights_only=False is the pragmatic fix.
+    _original_torch_load = torch.load
+    def _patched_torch_load(*args, **kwargs):
+        kwargs['weights_only'] = False
+        return _original_torch_load(*args, **kwargs)
+    torch.load = _patched_torch_load
+    logger.debug("[WHISPERX_ENGINE] PYTORCH26_FIX: patched torch.load to default weights_only=False")
 except ImportError:
     from . import mock_whisperx as whisperx
     WHISPERX_AVAILABLE = False
