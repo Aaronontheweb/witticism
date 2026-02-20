@@ -16,7 +16,8 @@ try:
     # PyTorch 2.6 changed weights_only default to True, breaking WhisperX model loading
     try:
         from omegaconf import ListConfig, DictConfig
-        torch.serialization.add_safe_globals([ListConfig, DictConfig])
+        from omegaconf.base import ContainerMetadata
+        torch.serialization.add_safe_globals([ListConfig, DictConfig, ContainerMetadata])
         logger.debug("[WHISPERX_ENGINE] PYTORCH26_FIX: added omegaconf types to torch safe globals")
     except ImportError:
         logger.debug("[WHISPERX_ENGINE] PYTORCH26_FIX: omegaconf not available, skipping safe globals setup")
