@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-02-20
+
+### 🔧 Fixed
+
+#### PyTorch 2.6+ Model Loading
+- **Fixed remaining startup failures with PyTorch 2.6+** - Replaced the `safe_globals` allowlist approach with a `torch.load` monkey-patch that forces `weights_only=False` for all model loads ([#116](https://github.com/Aaronontheweb/witticism/pull/116), follow-up to [#105](https://github.com/Aaronontheweb/witticism/issues/105))
+- The 0.8.0 fix added `ListConfig` and `DictConfig` to safe globals but missed `omegaconf.base.ContainerMetadata`, causing `WeightsUnpickler` errors on startup
+- The allowlist strategy was inherently fragile since whisperx and pyannote load models with many dynamic types (`omegaconf`, `typing.Any`, etc.)
+- New approach patches `torch.load` to always use `weights_only=False`, which is safe because Witticism only loads trusted local model checkpoints
+
+### 📊 Impact
+This patch release completes the PyTorch 2.6+ compatibility fix started in 0.8.0. Users who still experienced startup crashes after upgrading to 0.8.0 should now be able to run Witticism without issues on PyTorch 2.6, 2.7, and later versions.
+
 ## [0.8.0] - 2026-01-23
 
 ### 🚀 Feature Release: Transcription Resilience & Compatibility
@@ -559,7 +572,8 @@ This release completes the foundational observability and recovery systems that 
 - Audio device selection
 - Configuration persistence
 
-[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/Aaronontheweb/witticism/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/Aaronontheweb/witticism/compare/v0.7.3...v0.8.0
 [0.7.3]: https://github.com/Aaronontheweb/witticism/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/Aaronontheweb/witticism/compare/v0.7.1...v0.7.2
