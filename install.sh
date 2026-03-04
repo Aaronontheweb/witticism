@@ -58,13 +58,17 @@ if [ "$EUID" -eq 0 ]; then
    exit 1
 fi
 
-# Install system dependencies for pyaudio
+# Install system dependencies (build headers + pyaudio)
 NEEDS_DEPS=false
 if command -v apt-get &> /dev/null; then
     # Debian/Ubuntu
     MISSING_PACKAGES=()
     if ! dpkg -l | grep -q portaudio19-dev; then
         MISSING_PACKAGES+=("portaudio19-dev")
+    fi
+    PYTHON_VERSION=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+    if ! dpkg -l | grep -q "python${PYTHON_VERSION}-dev\|python3-dev"; then
+        MISSING_PACKAGES+=("python${PYTHON_VERSION}-dev")
     fi
     if [ ${#MISSING_PACKAGES[@]} -gt 0 ]; then
         NEEDS_DEPS=true
@@ -77,6 +81,9 @@ elif command -v dnf &> /dev/null; then
     if ! rpm -qa | grep -q portaudio-devel; then
         MISSING_PACKAGES+=("portaudio-devel")
     fi
+    if ! rpm -qa | grep -q python3-devel; then
+        MISSING_PACKAGES+=("python3-devel")
+    fi
     if [ ${#MISSING_PACKAGES[@]} -gt 0 ]; then
         NEEDS_DEPS=true
         DEPS_CMD="dnf install -y ${MISSING_PACKAGES[*]}"
@@ -87,6 +94,10 @@ elif command -v pacman &> /dev/null; then
     MISSING_PACKAGES=()
     if ! pacman -Q portaudio &> /dev/null; then
         MISSING_PACKAGES+=("portaudio")
+    fi
+    # python package on Arch includes development headers
+    if ! pacman -Q python &> /dev/null; then
+        MISSING_PACKAGES+=("python")
     fi
     if [ ${#MISSING_PACKAGES[@]} -gt 0 ]; then
         NEEDS_DEPS=true
