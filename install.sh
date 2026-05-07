@@ -62,9 +62,17 @@ fi
 NEEDS_DEPS=false
 if command -v apt-get &> /dev/null; then
     # Debian/Ubuntu
+    # python3-dev provides Python.h; required to build pyaudio + evdev (pynput dep)
+    # from sdist when no matching wheel is available for the system python.
     MISSING_PACKAGES=()
     if ! dpkg -l | grep -q portaudio19-dev; then
         MISSING_PACKAGES+=("portaudio19-dev")
+    fi
+    if ! dpkg -s python3-dev &> /dev/null; then
+        MISSING_PACKAGES+=("python3-dev")
+    fi
+    if ! dpkg -s build-essential &> /dev/null; then
+        MISSING_PACKAGES+=("build-essential")
     fi
     if [ ${#MISSING_PACKAGES[@]} -gt 0 ]; then
         NEEDS_DEPS=true
@@ -73,9 +81,16 @@ if command -v apt-get &> /dev/null; then
     fi
 elif command -v dnf &> /dev/null; then
     # Fedora/RHEL
+    # python3-devel provides Python.h; gcc is needed to build pyaudio + evdev sdists.
     MISSING_PACKAGES=()
     if ! rpm -qa | grep -q portaudio-devel; then
         MISSING_PACKAGES+=("portaudio-devel")
+    fi
+    if ! rpm -q python3-devel &> /dev/null; then
+        MISSING_PACKAGES+=("python3-devel")
+    fi
+    if ! rpm -q gcc &> /dev/null; then
+        MISSING_PACKAGES+=("gcc")
     fi
     if [ ${#MISSING_PACKAGES[@]} -gt 0 ]; then
         NEEDS_DEPS=true
