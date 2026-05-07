@@ -634,7 +634,7 @@ if ($CPUOnly) {
             # Try common NVIDIA installation paths on Windows
             $commonPaths = @(
                 "$env:ProgramFiles\NVIDIA Corporation\NVSMI\nvidia-smi.exe",
-                "$env:ProgramFiles(x86)\NVIDIA Corporation\NVSMI\nvidia-smi.exe",
+                "${env:ProgramFiles(x86)}\NVIDIA Corporation\NVSMI\nvidia-smi.exe",
                 "$env:SystemRoot\System32\nvidia-smi.exe",
                 "$env:WinDir\System32\nvidia-smi.exe"
             )
