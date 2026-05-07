@@ -634,15 +634,41 @@ if ($CPUOnly) {
             # Try common NVIDIA installation paths on Windows
             $commonPaths = @(
                 "$env:ProgramFiles\NVIDIA Corporation\NVSMI\nvidia-smi.exe",
-                "$env:ProgramFiles(x86)\NVIDIA Corporation\NVSMI\nvidia-smi.exe",
+                "${env:ProgramFiles(x86)}\NVIDIA Corporation\NVSMI\nvidia-smi.exe",
                 "$env:SystemRoot\System32\nvidia-smi.exe",
                 "$env:WinDir\System32\nvidia-smi.exe"
             )
-            
+
             foreach ($path in $commonPaths) {
                 if (Test-Path $path) {
                     $nvidiaSmiPath = Get-Item $path
                     break
+                }
+            }
+
+            # CUDA Toolkit ships nvidia-smi under a versioned directory
+            # (e.g. ...\CUDA\v13.0\bin\nvidia-smi.exe). Glob for it and
+            # pick the highest version when multiple toolkits are installed.
+            if (-not $nvidiaSmiPath) {
+                $toolkitRoots = @(
+                    "$env:ProgramFiles\NVIDIA GPU Computing Toolkit\CUDA",
+                    "${env:ProgramFiles(x86)}\NVIDIA GPU Computing Toolkit\CUDA"
+                )
+                foreach ($root in $toolkitRoots) {
+                    if (-not (Test-Path $root)) { continue }
+                    $candidate = Get-ChildItem -Path $root -Directory -Filter 'v*' -ErrorAction SilentlyContinue |
+                        Sort-Object -Property @{ Expression = {
+                            $parsed = $null
+                            if ([System.Version]::TryParse($_.Name.TrimStart('v'), [ref]$parsed)) { $parsed }
+                            else { [System.Version]'0.0' }
+                        } } -Descending |
+                        ForEach-Object { Join-Path $_.FullName 'bin\nvidia-smi.exe' } |
+                        Where-Object { Test-Path $_ } |
+                        Select-Object -First 1
+                    if ($candidate) {
+                        $nvidiaSmiPath = Get-Item $candidate
+                        break
+                    }
                 }
             }
         }
