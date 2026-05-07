@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-05-07
+
+### 🔧 Fixed
+
+#### Linux Installer
+- **Fixed install-from-source failures on clean Ubuntu/Fedora hosts** - `install.sh` now installs Python development headers and a C toolchain so `pyaudio` and `evdev` can build their native extensions ([#121](https://github.com/Aaronontheweb/witticism/pull/121), closes [#120](https://github.com/Aaronontheweb/witticism/issues/120))
+- The apt branch now installs `python3-dev` and `build-essential`; the dnf branch now installs `python3-devel` and `gcc`
+- Fixes `Python.h: No such file or directory` errors during `pip install` on hosts that lack a compiler or Python headers (notably clean Ubuntu 24.04 systems)
+
+#### Windows Installer
+- **Fixed nvidia-smi detection under the CUDA Toolkit installation path** - `install.ps1` now also looks for `nvidia-smi.exe` under `...\NVIDIA GPU Computing Toolkit\CUDA\v*\bin\`, picking the highest installed toolkit version ([#122](https://github.com/Aaronontheweb/witticism/pull/122), closes [#93](https://github.com/Aaronontheweb/witticism/issues/93))
+- Fixed a latent variable-interpolation bug where `$env:ProgramFiles(x86)` was not expanded correctly; the installer now uses `${env:ProgramFiles(x86)}` to resolve to `C:\Program Files (x86)\...` as intended
+- Restores GPU detection for Windows users whose NVIDIA driver does not place `nvidia-smi.exe` on `PATH`
+
+### 📊 Impact
+This patch release fixes installer regressions on both Linux and Windows. Users on clean Ubuntu 24.04 / Fedora hosts can now run `install.sh` without manually pre-installing build tools, and Windows users with the CUDA Toolkit installed will once again have their NVIDIA GPU detected during installation. No application code or runtime behavior changed.
+
 ## [0.8.1] - 2026-02-20
 
 ### 🔧 Fixed
@@ -572,7 +589,8 @@ This release completes the foundational observability and recovery systems that 
 - Audio device selection
 - Configuration persistence
 
-[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/v0.8.2...HEAD
+[0.8.2]: https://github.com/Aaronontheweb/witticism/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/Aaronontheweb/witticism/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/Aaronontheweb/witticism/compare/v0.7.3...v0.8.0
 [0.7.3]: https://github.com/Aaronontheweb/witticism/compare/v0.7.2...v0.7.3
