@@ -44,7 +44,7 @@ witticism-platform install-gnome-extension
 
 This step is entirely opt-in, prompts for confirmation, and requires you to **log out and back in** before it takes effect. The installer never deploys it for you.
 
-On Wayland, transcribed text is **copied to your clipboard by default** - just paste it with Ctrl+V. There are **no permission dialogs** at startup. If you'd like Witticism to paste for you automatically, you can optionally enable that from the tray menu; it uses a one-time GNOME permission (a system dialog titled "Remote Desktop", covering keyboard input only) and Witticism will explain what to expect before it appears. You can turn it off again at any time.
+On Wayland, transcribed text is **copied to your clipboard by default** - just paste it (Ctrl+V, or Ctrl+Shift+V in a terminal). There are **no permission dialogs** at startup. If you'd like Witticism to insert text for you automatically, you can optionally enable **automatic typing** from the tray menu; it types the transcript into the active app (so it works everywhere, including terminals). It uses a one-time GNOME permission (a system dialog titled "Remote Desktop", covering keyboard input only) and Witticism explains what to expect before it appears. You can turn it off again at any time.
 
 Run `witticism-platform doctor` at any time to see which backends are active and how to improve them. See [docs/platform-adapters.md](docs/platform-adapters.md) for the full support matrix.
 
