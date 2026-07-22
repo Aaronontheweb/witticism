@@ -535,6 +535,15 @@ X-GNOME-Autostart-enabled=true
 EOF
 fi
 
+# Install the GNOME Wayland shortcut bridge when GNOME is the active desktop.
+if [ "$WITTICISM_NO_DESKTOP" != "1" ] && [[ "${XDG_CURRENT_DESKTOP:-}" == *GNOME* ]]; then
+    echo "Setting up GNOME Wayland integration..."
+    if command -v witticism-platform &> /dev/null; then
+        witticism-platform install-gnome-extension || \
+            echo "GNOME integration needs attention; run: witticism-platform install-gnome-extension"
+    fi
+fi
+
 echo "✅ Installation complete!"
 echo ""
 if [ "$WITTICISM_NO_DESKTOP" != "1" ]; then

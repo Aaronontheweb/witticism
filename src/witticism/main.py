@@ -343,7 +343,8 @@ class WitticismApp:
             output_mode = self.config_manager.get("output.mode", "type")
             logger.info(f"[WITTICISM] OUTPUT_INIT: mode={output_mode}")
             self.output_manager = OutputManager(
-                output_mode=output_mode
+                output_mode=output_mode,
+                config_manager=self.config_manager
             )
 
             # Initialize hotkey manager
@@ -376,6 +377,13 @@ class WitticismApp:
 
         # Start hotkey manager
         self.hotkey_manager.start()
+        if not self.hotkey_manager.status.usable and self.tray_app:
+            status = self.hotkey_manager.status
+            guidance = f"\n\n{status.recovery_action}" if status.recovery_action else ""
+            self.tray_app.showMessage(
+                "Witticism Platform Integration",
+                f"Push-to-talk is unavailable: {status.message or status.state.value}{guidance}",
+            )
 
     def _force_cpu_mode_and_retry(self):
         """Force CPU mode and retry initialization after CUDA failure"""

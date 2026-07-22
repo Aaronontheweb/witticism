@@ -35,17 +35,19 @@ dependencies = [
     "pyperclip>=1.8.0",
     "platformdirs>=3.0.0",
     "pydbus>=0.6.0; sys_platform == 'linux'",  # Linux only for sleep monitoring
+    "dbus-next>=0.2.3; sys_platform == 'linux'",  # Wayland portals and GNOME Shell bridge
 ]
 
 
 [project.scripts]
 witticism = "witticism.main:main"
+witticism-platform = "witticism.platform.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-witticism = ["assets/*"]
+witticism = ["assets/*", "platform/gnome_shell_extension/*"]
 
 [tool.setuptools_scm]
 write_to = "src/witticism/_version.py"

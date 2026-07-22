@@ -64,6 +64,7 @@ If you prefer to install manually:
 ### Prerequisites
 
 - **Linux** (Ubuntu, Fedora, Debian, etc.)
+- **Linux display integration**: X11 and GNOME 46 / portal-capable Wayland sessions
 - **Python 3.10-3.12** (pipx will handle this)
 - **NVIDIA GPU** (optional but recommended for faster transcription)
 
