@@ -10,11 +10,11 @@ This document is the maintained runtime contract for desktop integration. ADR-00
 | Linux X11 | pynput Xorg | hold-to-talk | pynput typing | Supported |
 | Wayland with GlobalShortcuts portal (KDE, GNOME 48+) | XDG GlobalShortcuts | hold-to-talk | Clipboard (optional consent-gated portal paste) | Supported |
 | GNOME 46/47 Wayland, extension installed and running | Witticism GNOME Shell extension | hold-to-talk | Clipboard (optional consent-gated portal paste) | Supported |
-| GNOME 46/47 Wayland, no extension | Standard GNOME custom keyboard shortcut | press-to-toggle | Clipboard (optional consent-gated portal paste) | Supported |
+| GNOME 46/47 Wayland, no extension | Standard GNOME custom keyboard shortcut | hold-to-talk (via key-repeat inference); press-to-toggle if key repeat is disabled | Clipboard (optional consent-gated portal paste) | Supported |
 | Other Wayland without the portal | none | unavailable (tray/manual only) | Clipboard only | Degraded |
 | macOS | none | unavailable | Clipboard only | Unsupported |
 
-The three capability tiers are **hold-to-talk** (hold the hotkey to record, release to stop), **press-to-toggle (fallback)** (press once to start, press again to stop), and **unavailable** (no global shortcut; tray and manual controls only). The press-to-toggle fallback is press-to-toggle by necessity: a GNOME custom keyboard shortcut delivers only a key-press and never a release, so a held-key model is impossible. It is the no-setup default on GNOME 46/47 Wayland; the optional extension upgrades those sessions to hold-to-talk.
+The three capability tiers are **hold-to-talk** (hold the hotkey to record, release to stop), **press-to-toggle (fallback)** (press once to start, press again to stop), and **unavailable** (no global shortcut; tray and manual controls only). On GNOME 46/47 Wayland the no-setup custom keyboard shortcut reaches hold-to-talk by inferring the key release from GNOME's auto-repeat stream (a held key re-fires the shortcut command every ~repeat-interval; the stream going quiet marks the release). Where key auto-repeat is disabled, no stream exists, so the same backend can only do press-to-toggle. The optional extension provides exact, repeat-independent release timing.
 
 On Wayland, text delivery is clipboard-first by design: transcripts are copied for a plain `Ctrl+V`, with no permission prompt. Automatic paste through the Remote Desktop portal is available but strictly opt-in - it is never probed or started, and GNOME's permission dialog never appears, until the user enables it (see [ADR-004](adr/004-gnome-keybinding-press-to-toggle.md)).
 
@@ -39,7 +39,7 @@ Shortcut backend, in order:
 3. Wayland with `org.freedesktop.portal.GlobalShortcuts` (KDE, GNOME 48+) selects the portal (hold-to-talk).
 4. GNOME Wayland without that portal (e.g. GNOME 46/47):
    - if the optional Witticism GNOME Shell extension (`witticism@stannardlabs.com`) is installed and running, select it (hold-to-talk);
-   - otherwise register a standard GNOME custom keyboard shortcut (press-to-toggle).
+   - otherwise register a standard GNOME custom keyboard shortcut (hold-to-talk via key-repeat inference; press-to-toggle where key repeat is disabled).
 5. Other Wayland sessions without the portal expose no shortcut backend; the tray and manual controls remain available.
 6. Shortcut and output selection are independent.
 
@@ -55,7 +55,9 @@ Display and portal detection must occur before importing pynput. Dynamic binding
 
 On GNOME Wayland without the GlobalShortcuts portal, two backends are possible.
 
-The **standard GNOME custom keyboard shortcut** is the no-setup default. Witticism registers an ordinary custom shortcut on the `org.gnome.settings-daemon.plugins.media-keys` schema - exactly the kind a user creates by hand in Settings > Keyboard > Custom Shortcuts - whose command asks Witticism, over its own session-bus name (`com.stannardlabs.Witticism`, method `com.stannardlabs.Witticism.Control.TriggerShortcut`), to trigger the bound action. It needs no installation and no logout, is visible and editable in GNOME Settings, injects no code into the compositor, and is removed when Witticism exits. Because a custom shortcut delivers only key-press events, the hotkey works as press-to-toggle rather than hold-to-talk. It preserves every existing user keybinding, refuses to modify an unparseable non-empty list rather than risk clobbering user shortcuts, and cleans up leftover `witticism-*` entries from a crashed run at the next start.
+The **standard GNOME custom keyboard shortcut** is the no-setup default. Witticism registers an ordinary custom shortcut on the `org.gnome.settings-daemon.plugins.media-keys` schema - exactly the kind a user creates by hand in Settings > Keyboard > Custom Shortcuts - whose command asks Witticism, over its own session-bus name (`com.stannardlabs.Witticism`, method `com.stannardlabs.Witticism.Control.TriggerShortcut`), to trigger the bound action. It needs no installation and no logout, is visible and editable in GNOME Settings, injects no code into the compositor, and is removed when Witticism exits. It preserves every existing user keybinding, refuses to modify an unparseable non-empty list rather than risk clobbering user shortcuts, and cleans up leftover `witticism-*` entries from a crashed run at the next start.
+
+gnome-settings-daemon re-fires the shortcut command on every key auto-repeat while the key is held. The adapter uses that as a release detector to synthesize **hold-to-talk**: it emits an activation on the first event of a repeat stream, swallows the repeats, and emits a deactivation once the stream goes quiet (arming a timer of `delay + 4*interval + 100ms` on the first event and re-arming `4*interval + 100ms` on each repeat, using the session's `delay`/`repeat-interval`). When key auto-repeat is disabled there is no stream, so the backend advertises `supports_hold = False` and the hotkey manager runs press-to-toggle instead.
 
 This replaced an earlier `org.gnome.Shell.GrabAccelerator` fallback, which is unusable: that method is sender-allowlisted to GNOME's own components since GNOME 41 and denies third-party callers (see [ADR-004](adr/004-gnome-keybinding-press-to-toggle.md)).
 
@@ -75,6 +77,8 @@ Automatic paste is off by default and strictly opt-in. Until the user consents, 
 
 Consent state (`output.autopaste`: `unset` | `granted` | `declined`) is persisted, guarded by a one-time `output.autopaste_prompted` flag. See [ADR-004](adr/004-gnome-keybinding-press-to-toggle.md).
 
+If auto-paste is later revoked mid-session (the user turns it off from GNOME's system remote-desktop indicator), the adapter observes the portal session's `Closed` signal, drops to clipboard, resets consent to `unset`, and deletes the restore token, so the tray's "Enable automatic paste..." offer reappears and re-enabling runs the full consent flow again. A paste that fails because the session vanished degrades the same way without losing the transcript (it is copied to the clipboard before the paste is attempted).
+
 ## Portal permissions and state
 
 Remote Desktop requests keyboard access only: no screen, pointer, touchscreen, or portal clipboard access. When the user grants auto-paste, authorization uses persistent mode. Its opaque, single-use restore token is stored separately from user configuration with mode 0600 and atomically rotated. Tokens must never appear in logs, diagnostics, configuration exports, or issues.
@@ -89,6 +93,6 @@ Implement the relevant contract, keep imports lazy, add selection without changi
 
 ## Diagnostics
 
-`witticism-platform doctor` reports session type, desktop, portal capabilities (GlobalShortcuts and RemoteDesktop), the selected shortcut backend and its capability tier (hold-to-talk, press-to-toggle (fallback), or unavailable), whether Witticism's own GNOME custom keybinding is currently registered, the selected output backend and its tier (portal paste, typing, or clipboard), the auto-paste consent state (unset/granted/declined), the extension installed/running state, and whether a portal restore grant exists. When a session can be improved it also prints a "how to improve" line, such as the opt-in extension install hint with its logout caveat on GNOME, or the optional auto-paste hint on Wayland.
+`witticism-platform doctor` reports session type, desktop, portal capabilities (GlobalShortcuts and RemoteDesktop), the selected shortcut backend and its capability tier (hold-to-talk, press-to-toggle (fallback), or unavailable), whether Witticism's own GNOME custom keybinding is currently registered and whether GNOME key auto-repeat is enabled (which determines the keybinding tier), the selected output backend and its tier (portal paste, typing, or clipboard), the auto-paste consent state (unset/granted/declined), the extension installed/running state, and whether a portal restore grant exists. When a session can be improved it also prints a "how to improve" line, such as the opt-in extension install hint with its logout caveat on GNOME, or the optional auto-paste hint on Wayland.
 
 Output defaults to human-readable text; `--json` emits the machine-readable report. `doctor` degrades gracefully when D-Bus is unreachable, reporting whatever it can rather than crashing. It must not report usernames, hostnames, hardware, devices, paths, tokens, transcripts, environment dumps, or raw logs. The keybinding-registered check reports only the presence of Witticism's own entries; it never reveals the names or paths of any other custom keyboard shortcut.

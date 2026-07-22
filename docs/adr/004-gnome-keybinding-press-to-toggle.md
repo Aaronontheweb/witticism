@@ -119,3 +119,58 @@ This ADR supersedes the GrabAccelerator fallback and the startup Remote Desktop
 session described in ADR-002; the adapter contracts, shortcut-identifier-only
 extension bridge, and portal token isolation from ADR-002 are otherwise
 unchanged.
+
+## Addendum: hold-to-talk via key-repeat inference
+
+Live testing revealed that gnome-settings-daemon fires the custom-shortcut
+command on **every key auto-repeat** while the key is held, not just once. On
+the target machine (repeat delay 500ms, interval 30ms, from
+`org.gnome.desktop.peripherals.keyboard`), holding F9 produced a stream of
+`TriggerShortcut` calls that flipped recording on and off every ~270-480ms
+through the press-to-toggle debounce - a blocker, because users hold F9 out of
+push-to-talk muscle memory.
+
+The same behavior is the fix. The repeat stream is a release detector: a tap is
+a single event; a hold is one event, a ~`delay` gap, then events every
+~`interval` until release. So the keybinding adapter now **synthesizes true
+hold-to-talk** on GNOME 46/47:
+
+- At start it reads `repeat`, `delay`, and `repeat-interval` from
+  `org.gnome.desktop.peripherals.keyboard` (defaults: repeat=true, delay=500ms,
+  interval=30ms).
+- **When key repeat is enabled** (the normal case) it advertises
+  `supports_hold = True`. A per-binding tracker emits ACTIVATED on the first
+  event of a stream, swallows the repeats, and emits DEACTIVATED once the stream
+  goes quiet: it arms a `delay + 4*interval + 100ms` timer on the first event
+  (long enough to bridge the first-repeat gap, which equals `delay`) and re-arms
+  a `4*interval + 100ms` timer on each subsequent event. A held key therefore
+  produces one ACTIVATED at press and one DEACTIVATED ~`4*interval + 100ms`
+  after release. Tap (ACTIVATE) bindings such as mode-switch emit ACTIVATED once
+  per stream and swallow the repeats. The tracker runs entirely on the async
+  runtime loop, so all state stays single-threaded.
+- **When key repeat is disabled** (rare) no repeats occur, so it keeps
+  `supports_hold = False` and press-to-toggle via the hotkey manager.
+
+Trade-offs, stated honestly: release is detected ~`4*interval + 100ms` after the
+key is let go (~220ms with defaults); a hold shorter than `delay` cannot be
+distinguished from a tap and reads as a brief push-to-talk burst (the same
+effective UX as tapping the old X11 PTT key); and each repeat spawns a
+short-lived `gdbus` process on the gnome-settings-daemon side (unavoidable,
+cheap). The optional GNOME Shell extension remains the path to exact,
+repeat-independent release timing, and the only hold-to-talk path for users who
+disable key repeat.
+
+## Addendum: mid-session auto-paste revocation
+
+Live testing also found that turning auto-paste off from GNOME's system
+remote-desktop indicator closed our portal session silently - the adapter did
+not notice, so auto-paste died and never re-prompted. The adapter now subscribes
+to the portal session's `org.freedesktop.portal.Session.Closed` signal. On
+closure it drops to clipboard (DEGRADED), clears the dead session, resets
+`output.autopaste` to `unset`, and deletes the restore token, so re-enabling
+runs the full priming + portal flow again and the tray's "Enable automatic
+paste..." offer reappears (the tray re-evaluates that item's visibility each
+time the menu opens). A paste that fails because the session vanished just
+before its `Closed` signal arrives degrades the same way without raising; the
+transcript is copied to the clipboard before the paste is attempted, so it is
+never lost.

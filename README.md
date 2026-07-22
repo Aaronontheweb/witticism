@@ -36,7 +36,7 @@ Witticism works out of the box, with full hold-to-talk (hold the hotkey to recor
 - **Linux X11**
 - **Linux Wayland with the GlobalShortcuts portal** - KDE Plasma and GNOME 48+
 
-On **GNOME 46 / 47 Wayland**, which do not yet expose that portal, Witticism still works out of the box in **press-to-toggle** mode: press the hotkey once to start recording, and again to stop. It does this by registering a standard GNOME custom keyboard shortcut (the same kind you can create in Settings > Keyboard > Custom Shortcuts) - no install, no logout, and you can see and edit it there; it is removed when Witticism exits. For true hold-to-talk on these versions you can optionally install a small GNOME Shell extension:
+On **GNOME 46 / 47 Wayland**, which do not yet expose that portal, Witticism still works out of the box with **hold-to-talk**: hold the hotkey to record, release to stop. It does this by registering a standard GNOME custom keyboard shortcut (the same kind you can create in Settings > Keyboard > Custom Shortcuts) - no install, no logout, and you can see and edit it there; it is removed when Witticism exits - and inferring the key release from GNOME's key-repeat stream. (If you have key auto-repeat turned off, the same hotkey works in press-to-toggle mode instead: press once to start, again to stop.) For exact, repeat-independent release timing you can optionally install a small GNOME Shell extension:
 
 ```bash
 witticism-platform install-gnome-extension
@@ -84,7 +84,7 @@ If you prefer to install manually:
 ### Prerequisites
 
 - **Linux** (Ubuntu, Fedora, Debian, etc.)
-- **Linux display integration**: X11, Wayland with the GlobalShortcuts portal (KDE, GNOME 48+), or GNOME 46/47 Wayland (press-to-toggle out of the box via a standard GNOME custom keyboard shortcut; optional extension for hold-to-talk). See [Platform support](#platform-support).
+- **Linux display integration**: X11, Wayland with the GlobalShortcuts portal (KDE, GNOME 48+), or GNOME 46/47 Wayland (hold-to-talk out of the box via a standard GNOME custom keyboard shortcut with key-repeat release inference; optional extension for exact release timing). See [Platform support](#platform-support).
 - **Python 3.10-3.12** (pipx will handle this)
 - **NVIDIA GPU** (optional but recommended for faster transcription)
 

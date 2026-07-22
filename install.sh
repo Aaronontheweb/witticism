@@ -543,15 +543,16 @@ if [ "$WITTICISM_NO_DESKTOP" != "1" ] && [[ "${XDG_CURRENT_DESKTOP:-}" == *GNOME
    { [ "${XDG_SESSION_TYPE:-}" = "wayland" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; }; then
     echo ""
     echo "ℹ️  GNOME Wayland detected."
-    echo "   Witticism works out of the box here in press-to-toggle mode:"
-    echo "   press your hotkey once to start recording, and again to stop."
+    echo "   Witticism works out of the box here with hold-to-talk: hold your"
+    echo "   hotkey to record, release to stop. (If you have key auto-repeat"
+    echo "   disabled, it works in press-to-toggle mode instead.)"
     echo ""
-    echo "   For true hold-to-talk on GNOME Wayland you can OPTIONALLY run:"
+    echo "   For exact, repeat-independent release timing you can OPTIONALLY run:"
     echo "     witticism-platform install-gnome-extension"
     echo ""
     echo "   That installs a GNOME Shell extension and requires you to log out"
     echo "   and back in before it takes effect. It is entirely optional -"
-    echo "   without it, the hotkey still works in press-to-toggle mode."
+    echo "   without it, the hotkey already works."
 fi
 
 echo "✅ Installation complete!"
