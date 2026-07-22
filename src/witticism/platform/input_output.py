@@ -1,11 +1,13 @@
 """Platform input/output adapter contracts and implementations."""
 
+import ast
 import asyncio
 import json
 import logging
 import os
 import platform
 import re
+import subprocess
 import threading
 import time
 import uuid
@@ -26,22 +28,20 @@ GNOME_BUS = "com.stannardlabs.Witticism.Shell"
 GNOME_PATH = "/com/stannardlabs/Witticism/Shell"
 GNOME_INTERFACE = GNOME_BUS
 APP_BUS = "com.stannardlabs.Witticism"
-GNOME_SHELL_BUS = "org.gnome.Shell"
-GNOME_SHELL_PATH = "/org/gnome/Shell"
-GNOME_SHELL_INTERFACE = "org.gnome.Shell"
+APP_OBJECT_PATH = "/com/stannardlabs/Witticism"
+APP_CONTROL_INTERFACE = "com.stannardlabs.Witticism.Control"
+# Standard GNOME media-keys custom keyboard shortcuts. Registering an entry here
+# is exactly what a user does by hand in Settings > Keyboard > Custom Shortcuts;
+# the entry is visible and editable there and is removed when Witticism exits.
+GNOME_MEDIA_KEYS_SCHEMA = "org.gnome.settings-daemon.plugins.media-keys"
+GNOME_CUSTOM_KEYBINDING_SCHEMA = "org.gnome.settings-daemon.plugins.media-keys.custom-keybinding"
+GNOME_CUSTOM_KEYBINDINGS_KEY = "custom-keybindings"
+GNOME_CUSTOM_KEYBINDING_BASE = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/"
 DBUS_BUS = "org.freedesktop.DBus"
 DBUS_PATH = "/org/freedesktop/DBus"
 GNOME_EXTENSION_RECOVERY = (
     "Run: witticism-platform install-gnome-extension, then log out and back in"
 )
-GNOME_SHELL_XML = """<node>
-  <interface name="org.gnome.Shell">
-    <method name="GrabAccelerator"><arg type="s" direction="in"/><arg type="u" direction="in"/><arg type="u" direction="in"/><arg type="u" direction="out"/></method>
-    <method name="GrabAccelerators"><arg type="a(suu)" direction="in"/><arg type="au" direction="out"/></method>
-    <method name="UngrabAccelerator"><arg type="u" direction="in"/><arg type="b" direction="out"/></method>
-    <signal name="AcceleratorActivated"><arg type="u"/><arg type="a{sv}"/></signal>
-  </interface>
-</node>"""
 GLOBAL_SHORTCUTS_XML = """<node>
   <interface name="org.freedesktop.portal.GlobalShortcuts">
     <method name="CreateSession"><arg type="a{sv}" direction="in"/><arg type="o" direction="out"/></method>
@@ -569,14 +569,44 @@ def _to_gnome_accelerator(accelerator):
     return prefix + key
 
 
-class GrabAcceleratorShortcutAdapter(ShortcutAdapter):
-    """GNOME Wayland fallback using org.gnome.Shell.GrabAccelerator.
+class _KeybindingError(Exception):
+    """A gsettings operation failed, or the existing custom-keybindings list
+    could not be parsed safely (in which case we refuse to overwrite it)."""
 
-    This backend delivers key-press events only (via AcceleratorActivated); it
-    can never observe a release, so it advertises ``supports_hold = False`` and
-    the hotkey manager degrades hold-to-talk to press-to-toggle. It is the last
-    resort when neither the GlobalShortcuts portal nor the Witticism GNOME Shell
-    extension is available.
+
+def _build_control_interface(dispatch):
+    """Build the exported ``com.stannardlabs.Witticism.Control`` service object.
+
+    dbus-next's service machinery is imported lazily so this module stays
+    importable without dbus-next. ``dispatch`` is called with the shortcut id
+    each time a registered keybinding fires ``gdbus ... TriggerShortcut``.
+    """
+    from dbus_next.service import ServiceInterface, method
+
+    class _WitticismControl(ServiceInterface):
+        def __init__(self):
+            super().__init__(APP_CONTROL_INTERFACE)
+
+        @method()
+        def TriggerShortcut(self, shortcut_id: "s"):  # noqa: F821 - dbus-next type
+            dispatch(shortcut_id)
+
+    return _WitticismControl()
+
+
+class GnomeKeybindingShortcutAdapter(ShortcutAdapter):
+    """GNOME Wayland press-to-toggle backend built on a standard custom shortcut.
+
+    This registers an ordinary GNOME custom keyboard shortcut - exactly the kind
+    a user creates by hand in Settings > Keyboard > Custom Shortcuts - whose
+    command asks Witticism (over its own session-bus name) to trigger the bound
+    action. The shortcut is visible and editable in GNOME Settings, injects no
+    code into the compositor, requires no logout, and is removed when Witticism
+    exits.
+
+    A custom shortcut only ever fires on key-press, so this backend advertises
+    ``supports_hold = False`` and the hotkey manager runs press-to-toggle. The
+    optional GNOME Shell extension remains the upgrade path to hold-to-talk.
     """
 
     supports_hold = False
@@ -584,132 +614,244 @@ class GrabAcceleratorShortcutAdapter(ShortcutAdapter):
     def __init__(self, runtime=None):
         self.runtime = runtime or _AsyncDbusRuntime()
         self.bindings = []
+        self._binding_ids = set()
         self.on_event = None
         self.bus = None
-        self.interface = None
-        self.grabs = {}  # action id -> binding id
-        self.status = self._degraded_status()
+        self._control = None
+        self.status = AdapterStatus(AdapterState.STARTING, "gnome-media-keys")
 
-    def _degraded_status(self):
-        return AdapterStatus(
-            AdapterState.DEGRADED,
-            "gnome-shell-grab",
-            "Hold-to-talk is unavailable in this session; press-to-toggle is active",
-            GNOME_EXTENSION_RECOVERY,
-        )
+    # -- capability probe ---------------------------------------------------
 
     def probe(self):
         desktop = os.environ.get("XDG_CURRENT_DESKTOP", "").lower()
         if "gnome" not in desktop:
-            return AdapterStatus(AdapterState.UNAVAILABLE, "gnome-shell-grab", "Not a GNOME session")
-        return self._degraded_status()
+            return AdapterStatus(AdapterState.UNAVAILABLE, "gnome-media-keys", "Not a GNOME session")
+        return AdapterStatus(
+            AdapterState.READY,
+            "gnome-media-keys",
+            "A standard GNOME custom keyboard shortcut provides press-to-toggle",
+            GNOME_EXTENSION_RECOVERY,
+        )
+
+    # -- lifecycle ----------------------------------------------------------
 
     def start(self, bindings, on_event):
         status = self.probe()
         if not status.usable:
             return status
         self.bindings = list(bindings)
+        self._binding_ids = {b.id for b in self.bindings}
         self.on_event = on_event
-        # The capability degradation (no hold-to-talk) is known synchronously, so
-        # report DEGRADED immediately; the actual grabs happen asynchronously.
-        self.status = self._degraded_status()
+        # Export the D-Bus control object first so the registered gdbus command
+        # has something to call. Bounded wait: the export is a couple of local
+        # round-trips on the async runtime, not a user-facing operation.
         try:
-            self.runtime.submit(self._initialize())
+            self.runtime.submit(self._export_control()).result(timeout=5)
         except Exception as exc:
-            self.status = AdapterStatus(AdapterState.FAILED, "gnome-shell-grab", str(exc), GNOME_EXTENSION_RECOVERY)
-        return self.status
-
-    async def _initialize(self):
-        try:
-            from dbus_next import Message
-            from dbus_next.aio import MessageBus
-            from dbus_next.introspection import Node
-
-            self.bus = await MessageBus().connect()
-            obj = self.bus.get_proxy_object(GNOME_SHELL_BUS, GNOME_SHELL_PATH, Node.parse(GNOME_SHELL_XML))
-            self.interface = obj.get_interface(GNOME_SHELL_INTERFACE)
-            self.interface.on_accelerator_activated(self._on_accelerator_activated)
-            await self._grab_all()
-            await self._watch_shell_owner(Message)
-            logger.info("[PLATFORM_ADAPTER] GNOME Shell GrabAccelerator ready (press-to-toggle)")
-        except Exception as exc:
-            self.status = AdapterStatus(AdapterState.FAILED, "gnome-shell-grab", str(exc), GNOME_EXTENSION_RECOVERY)
-            logger.error("[PLATFORM_ADAPTER] GNOME Shell GrabAccelerator failed: %s", exc)
-
-    async def _grab_all(self):
-        self.grabs = {}
-        for binding in self.bindings:
-            accelerator = _to_gnome_accelerator(binding.accelerator)
-            action = await self.interface.call_grab_accelerator(accelerator, 0, 0)
-            if action:
-                self.grabs[action] = binding.id
-
-    async def _ungrab_all(self):
-        for action in list(self.grabs):
-            try:
-                await self.interface.call_ungrab_accelerator(action)
-            except Exception as exc:
-                logger.debug("[PLATFORM_ADAPTER] UngrabAccelerator(%s) failed: %s", action, exc)
-        self.grabs = {}
-
-    async def _regrab(self):
-        await self._ungrab_all()
-        await self._grab_all()
-
-    async def _watch_shell_owner(self, message_cls):
-        """Re-grab accelerators if org.gnome.Shell restarts (best effort)."""
-        try:
-            await self.bus.call(
-                message_cls(
-                    destination=DBUS_BUS,
-                    path=DBUS_PATH,
-                    interface=DBUS_BUS,
-                    member="AddMatch",
-                    signature="s",
-                    body=[
-                        "type='signal',sender='org.freedesktop.DBus',"
-                        "interface='org.freedesktop.DBus',member='NameOwnerChanged',"
-                        f"arg0='{GNOME_SHELL_BUS}'"
-                    ],
-                )
+            self.status = AdapterStatus(
+                AdapterState.FAILED,
+                "gnome-media-keys",
+                f"Could not export the D-Bus control interface: {exc}",
+                GNOME_EXTENSION_RECOVERY,
             )
-            from dbus_next import MessageType
-
-            def handler(msg):
-                if (
-                    msg.message_type == MessageType.SIGNAL
-                    and msg.interface == DBUS_BUS
-                    and msg.member == "NameOwnerChanged"
-                    and msg.body
-                    and msg.body[0] == GNOME_SHELL_BUS
-                    and msg.body[-1]
-                ):
-                    logger.info("[PLATFORM_ADAPTER] org.gnome.Shell restarted; re-grabbing accelerators")
-                    asyncio.ensure_future(self._regrab())
-
-            self.bus.add_message_handler(handler)
-        except Exception as exc:
-            logger.debug("[PLATFORM_ADAPTER] Could not watch org.gnome.Shell owner: %s", exc)
-
-    def _on_accelerator_activated(self, action, _parameters):
-        binding_id = self.grabs.get(action)
-        if binding_id is not None and self.on_event:
-            self.on_event(ShortcutEvent(binding_id, ShortcutEventType.ACTIVATED, int(time.time() * 1000)))
+            logger.error("[PLATFORM_ADAPTER] GNOME keybinding D-Bus export failed: %s", exc)
+            return self.status
+        # gsettings writes are fast local operations, safe to run synchronously.
+        return self._register()
 
     def update_bindings(self, bindings):
         self.bindings = list(bindings)
-        if self.interface:
-            self.runtime.submit(self._regrab())
-        return self.status
+        self._binding_ids = {b.id for b in self.bindings}
+        return self._register()
 
     def stop(self):
-        if self.runtime.loop and self.interface and self.grabs:
+        try:
+            self._deregister()
+        except Exception as exc:
+            logger.debug("[PLATFORM_ADAPTER] Keybinding deregister failed on stop: %s", exc)
+        if self.runtime.loop and self.bus is not None:
             try:
-                self.runtime.submit(self._ungrab_all()).result(timeout=2)
+                self.runtime.submit(self._teardown_control()).result(timeout=2)
             except Exception:
                 pass
         self.runtime.stop()
-        self.status = AdapterStatus(AdapterState.STOPPED, "gnome-shell-grab")
+        self.status = AdapterStatus(AdapterState.STOPPED, "gnome-media-keys")
+
+    # -- D-Bus control object ----------------------------------------------
+
+    async def _export_control(self):
+        from dbus_next.aio import MessageBus
+
+        self.bus = await MessageBus().connect()
+        self._control = _build_control_interface(self._dispatch_trigger)
+        self.bus.export(APP_OBJECT_PATH, self._control)
+        await self.bus.request_name(APP_BUS)
+        logger.info("[PLATFORM_ADAPTER] GNOME keybinding control interface exported")
+
+    async def _teardown_control(self):
+        try:
+            if self._control is not None:
+                self.bus.unexport(APP_OBJECT_PATH, self._control)
+        except Exception:
+            pass
+        try:
+            await self.bus.release_name(APP_BUS)
+        except Exception:
+            pass
+        try:
+            self.bus.disconnect()
+        except Exception:
+            pass
+
+    def _dispatch_trigger(self, shortcut_id):
+        if shortcut_id in self._binding_ids:
+            if self.on_event:
+                self.on_event(ShortcutEvent(shortcut_id, ShortcutEventType.ACTIVATED, int(time.time() * 1000)))
+        else:
+            logger.debug("[PLATFORM_ADAPTER] Ignoring unknown TriggerShortcut id: %s", shortcut_id)
+
+    # -- gsettings registration --------------------------------------------
+
+    @staticmethod
+    def _entry_path(binding_id):
+        return f"{GNOME_CUSTOM_KEYBINDING_BASE}witticism-{binding_id.replace('_', '-')}/"
+
+    @staticmethod
+    def _is_witticism_path(path):
+        return path.startswith(f"{GNOME_CUSTOM_KEYBINDING_BASE}witticism-")
+
+    @staticmethod
+    def _trigger_command(binding_id):
+        return (
+            "gdbus call --session "
+            f"--dest {APP_BUS} "
+            f"--object-path {APP_OBJECT_PATH} "
+            f"--method {APP_CONTROL_INTERFACE}.TriggerShortcut {binding_id}"
+        )
+
+    def _read_custom_keybindings(self):
+        """Return the current custom-keybindings list, preserving user entries.
+
+        Only ``@as []`` / empty output is treated as an empty list. A non-empty
+        value that will not parse is treated as an error so we never risk
+        clobbering the user's real keybindings.
+        """
+        result = subprocess.run(
+            ["gsettings", "get", GNOME_MEDIA_KEYS_SCHEMA, GNOME_CUSTOM_KEYBINDINGS_KEY],
+            capture_output=True, text=True, check=False,
+        )
+        if result.returncode != 0:
+            raise _KeybindingError(f"gsettings get {GNOME_CUSTOM_KEYBINDINGS_KEY} failed: {result.stderr.strip()}")
+        raw = (result.stdout or "").strip()
+        if raw in ("", "@as []", "[]"):
+            return []
+        try:
+            parsed = ast.literal_eval(raw)
+        except (SyntaxError, ValueError):
+            raise _KeybindingError(
+                "Refusing to modify GNOME custom keybindings: the existing list could not be "
+                "parsed and overwriting it could clobber your shortcuts"
+            )
+        if not isinstance(parsed, list):
+            raise _KeybindingError("Unexpected GNOME custom-keybindings value; refusing to modify it")
+        return [str(item) for item in parsed]
+
+    def _set_entry(self, path, key, value):
+        schema = f"{GNOME_CUSTOM_KEYBINDING_SCHEMA}:{path}"
+        result = subprocess.run(
+            ["gsettings", "set", schema, key, value],
+            capture_output=True, text=True, check=False,
+        )
+        if result.returncode != 0:
+            raise _KeybindingError(f"gsettings set {schema} {key} failed: {result.stderr.strip()}")
+
+    def _write_list(self, paths):
+        result = subprocess.run(
+            ["gsettings", "set", GNOME_MEDIA_KEYS_SCHEMA, GNOME_CUSTOM_KEYBINDINGS_KEY, repr(paths)],
+            capture_output=True, text=True, check=False,
+        )
+        if result.returncode != 0:
+            raise _KeybindingError(f"gsettings set {GNOME_CUSTOM_KEYBINDINGS_KEY} failed: {result.stderr.strip()}")
+
+    def _reset_entry(self, path):
+        schema = f"{GNOME_CUSTOM_KEYBINDING_SCHEMA}:{path}"
+        try:
+            subprocess.run(
+                ["gsettings", "reset-recursively", schema],
+                capture_output=True, text=True, check=False,
+            )
+        except Exception as exc:
+            logger.debug("[PLATFORM_ADAPTER] reset-recursively %s failed: %s", schema, exc)
+
+    def _register(self):
+        try:
+            existing = self._read_custom_keybindings()
+        except _KeybindingError as exc:
+            self.status = AdapterStatus(AdapterState.FAILED, "gnome-media-keys", str(exc), GNOME_EXTENSION_RECOVERY)
+            logger.error("[PLATFORM_ADAPTER] GNOME keybinding registration aborted: %s", exc)
+            return self.status
+        our_paths = [self._entry_path(b.id) for b in self.bindings]
+        our_set = set(our_paths)
+        # Crash-recovery: drop any leftover witticism-* entries from a prior run,
+        # while preserving every user entry, then register a fresh set.
+        stale = [p for p in existing if self._is_witticism_path(p) and p not in our_set]
+        preserved = [p for p in existing if not self._is_witticism_path(p)]
+        new_list = preserved + our_paths
+        written = []
+        try:
+            for binding in self.bindings:
+                path = self._entry_path(binding.id)
+                self._set_entry(path, "name", f"Witticism {binding.id.replace('_', '-')}")
+                self._set_entry(path, "command", self._trigger_command(binding.id))
+                self._set_entry(path, "binding", _to_gnome_accelerator(binding.accelerator))
+                written.append(path)
+            self._write_list(new_list)
+        except _KeybindingError as exc:
+            self._rollback(written, existing)
+            self.status = AdapterStatus(AdapterState.FAILED, "gnome-media-keys", str(exc), GNOME_EXTENSION_RECOVERY)
+            logger.error("[PLATFORM_ADAPTER] GNOME keybinding registration failed: %s", exc)
+            return self.status
+        for path in stale:
+            self._reset_entry(path)
+        self.status = self._ready_status()
+        logger.info("[PLATFORM_ADAPTER] GNOME custom keyboard shortcut registered (press-to-toggle)")
+        return self.status
+
+    def _rollback(self, written, original_list):
+        for path in written:
+            self._reset_entry(path)
+        try:
+            self._write_list(original_list)
+        except _KeybindingError as exc:
+            logger.debug("[PLATFORM_ADAPTER] Could not restore keybinding list during rollback: %s", exc)
+
+    def _deregister(self):
+        if not self.bindings:
+            return
+        our_paths = [self._entry_path(b.id) for b in self.bindings]
+        our_set = set(our_paths)
+        try:
+            existing = self._read_custom_keybindings()
+        except _KeybindingError:
+            existing = None
+        if existing is not None:
+            preserved = [p for p in existing if p not in our_set]
+            try:
+                self._write_list(preserved)
+            except _KeybindingError as exc:
+                logger.debug("[PLATFORM_ADAPTER] Could not prune keybinding list on stop: %s", exc)
+        for path in our_paths:
+            self._reset_entry(path)
+
+    def _ready_status(self):
+        ptt = next((b for b in self.bindings if b.id == "push_to_talk"), None)
+        source = ptt or (self.bindings[0] if self.bindings else None)
+        key = source.accelerator.upper() if source else "The hotkey"
+        message = (
+            f"{key} is registered as a standard GNOME custom keyboard shortcut (press-to-toggle); "
+            "view or change it in Settings > Keyboard"
+        )
+        return AdapterStatus(AdapterState.READY, "gnome-media-keys", message, GNOME_EXTENSION_RECOVERY)
 
 
 def _clipboard(text):
@@ -1064,11 +1206,11 @@ def create_shortcut_adapter():
             return PortalShortcutAdapter()
         if "gnome" in os.environ.get("XDG_CURRENT_DESKTOP", "").lower():
             # Prefer the dedicated GNOME Shell extension when it is loaded (its
-            # D-Bus name has an owner); otherwise fall back to GrabAccelerator
-            # press-to-toggle, which works without any extension install.
+            # D-Bus name has an owner); otherwise register a standard GNOME
+            # custom keyboard shortcut (press-to-toggle), which needs no install.
             if _dbus_name_has_owner(GNOME_BUS):
                 return GnomeShellShortcutAdapter()
-            return GrabAcceleratorShortcutAdapter()
+            return GnomeKeybindingShortcutAdapter()
         return UnavailableShortcutAdapter(
             "This Wayland compositor does not expose the Global Shortcuts portal",
             "Enable a compatible portal backend or use an X11 session",

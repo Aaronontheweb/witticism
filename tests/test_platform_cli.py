@@ -100,6 +100,7 @@ def test_doctor_json_has_expected_keys_and_no_forbidden_names(monkeypatch, capsy
     monkeypatch.setattr(cli, "_probe_output", lambda: "pynput")
     monkeypatch.setattr(cli, "_probe_extension", lambda: (False, False))
     monkeypatch.setattr(cli, "_restore_grant_present", lambda: False)
+    monkeypatch.setattr(cli, "_keybinding_registered", lambda: False)
 
     rc = cli.doctor(as_json=True)
     assert rc == 0
@@ -133,17 +134,19 @@ def test_doctor_json_has_expected_keys_and_no_forbidden_names(monkeypatch, capsy
 
 def test_doctor_reports_press_to_toggle_fallback_tier(monkeypatch, capsys):
     monkeypatch.setattr(cli, "_safe_portal_interfaces", lambda: set())
-    # Simulate the GrabAccelerator-style fallback backend.
-    monkeypatch.setattr(cli, "_probe_shortcut", lambda: ("gnome-grab-accelerator", "degraded", None))
+    # Simulate the GNOME custom-keybinding (media-keys) press-to-toggle backend.
+    monkeypatch.setattr(cli, "_probe_shortcut", lambda: ("gnome-media-keys", "ready", None))
     monkeypatch.setattr(cli, "_probe_output", lambda: "clipboard")
     monkeypatch.setattr(cli, "_probe_extension", lambda: (False, False))
     monkeypatch.setattr(cli, "_restore_grant_present", lambda: False)
+    monkeypatch.setattr(cli, "_keybinding_registered", lambda: True)
     monkeypatch.setenv("XDG_CURRENT_DESKTOP", "GNOME")
 
     rc = cli.doctor(as_json=True)
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["shortcut_capability"] == "press-to-toggle (fallback)"
+    assert payload["keybinding_registered"] is True
     # Degraded GNOME session should guide the user toward the optional extension.
     assert "install-gnome-extension" in payload["how_to_improve"]
 

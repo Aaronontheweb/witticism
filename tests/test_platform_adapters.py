@@ -1,3 +1,4 @@
+import ast
 import asyncio
 import concurrent.futures
 import os
@@ -13,8 +14,8 @@ from witticism.platform.input_output import (
     AdapterState,
     AdapterStatus,
     ClipboardTextOutputAdapter,
+    GnomeKeybindingShortcutAdapter,
     GnomeShellShortcutAdapter,
-    GrabAcceleratorShortcutAdapter,
     OutputResult,
     PynputShortcutAdapter,
     RemoteDesktopPasteAdapter,
@@ -128,18 +129,18 @@ def test_wayland_factory_uses_gnome_bridge_without_portal(monkeypatch):
     assert isinstance(input_output.create_shortcut_adapter(), GnomeShellShortcutAdapter)
 
 
-def test_wayland_factory_uses_grab_accelerator_without_extension(monkeypatch):
+def test_wayland_factory_uses_keybinding_adapter_without_extension(monkeypatch):
     monkeypatch.setattr(input_output.platform, "system", lambda: "Linux")
     monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
     monkeypatch.setenv("XDG_CURRENT_DESKTOP", "ubuntu:GNOME")
     monkeypatch.setattr(input_output, "portal_has_interface", lambda _name: False)
     monkeypatch.setattr(input_output, "_dbus_name_has_owner", lambda _name: False)
     adapter = input_output.create_shortcut_adapter()
-    assert isinstance(adapter, GrabAcceleratorShortcutAdapter)
+    assert isinstance(adapter, GnomeKeybindingShortcutAdapter)
+    assert adapter.supports_hold is False
     status = adapter.probe()
-    assert status.state == AdapterState.DEGRADED
     assert status.usable
-    assert "install-gnome-extension" in status.recovery_action
+    assert "install-gnome-extension" in (status.recovery_action or "")
 
 
 def test_x11_factory_preserves_pynput(monkeypatch):
@@ -345,27 +346,7 @@ def test_trigger_is_honored_in_pynput_adapter():
     assert [event.type.value for event in hold_events] == ["activated", "deactivated"]
 
 
-class FakeGrabInterface:
-    def __init__(self):
-        self.grabbed = []
-        self.ungrabbed = []
-        self._next_action = 100
-        self.signal_handler = None
-
-    def on_accelerator_activated(self, handler):
-        self.signal_handler = handler
-
-    async def call_grab_accelerator(self, accelerator, mode_flags, grab_flags):
-        self.grabbed.append((accelerator, mode_flags, grab_flags))
-        self._next_action += 1
-        return self._next_action
-
-    async def call_ungrab_accelerator(self, action):
-        self.ungrabbed.append(action)
-        return True
-
-
-def test_grab_accelerator_translation():
+def test_gnome_accelerator_translation():
     assert input_output._to_gnome_accelerator("F9") == "F9"
     assert input_output._to_gnome_accelerator("Ctrl+Alt+M") == "<Control><Alt>m"
     assert input_output._to_gnome_accelerator("Super+Shift+K") == "<Super><Shift>k"
@@ -376,7 +357,7 @@ def test_split_accelerator_tolerates_legacy_bracket_format():
     assert input_output._split_accelerator("<ctrl>+<alt>+m") == ({"ctrl", "alt"}, "m")
 
 
-def test_grab_accelerator_translation_tolerates_legacy_format():
+def test_gnome_accelerator_translation_tolerates_legacy_format():
     assert input_output._to_gnome_accelerator("<ctrl>+<alt>+m") == "<Control><Alt>m"
     assert input_output._to_gnome_accelerator("Ctrl+Alt+M") == "<Control><Alt>m"
 
@@ -396,71 +377,183 @@ def test_pynput_matches_legacy_bracket_accelerator():
         assert [event.type.value for event in events] == ["activated"], accelerator
 
 
-def test_grab_accelerator_grabs_with_translated_accelerators():
-    adapter = GrabAcceleratorShortcutAdapter()
-    adapter.interface = FakeGrabInterface()
+# ---------------------------------------------------------------------------
+# GNOME custom-keybinding press-to-toggle adapter (media-keys).
+# All gsettings/D-Bus interaction is mocked; nothing touches the real desktop.
+# ---------------------------------------------------------------------------
+
+_KB_BASE = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/"
+
+
+class _FakeProc:
+    def __init__(self, returncode=0, stdout="", stderr=""):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def _gsettings_fake(list_value="@as []", record=None):
+    """Fake ``subprocess.run`` for gsettings that serves a custom-keybindings
+    list and (optionally) records every invocation."""
+    def run(cmd, **kwargs):
+        if record is not None:
+            record.append(list(cmd))
+        if cmd[:2] == ["gsettings", "get"] and cmd[-1] == "custom-keybindings":
+            return _FakeProc(stdout=list_value)
+        return _FakeProc()
+    return run
+
+
+def test_keybinding_registration_writes_entries_and_preserves_list(monkeypatch):
+    adapter = GnomeKeybindingShortcutAdapter()
     adapter.bindings = [
         ShortcutBinding("push_to_talk", "F9", ShortcutTrigger.HOLD),
         ShortcutBinding("mode_switch", "Ctrl+Alt+M", ShortcutTrigger.ACTIVATE),
     ]
-    asyncio.run(adapter._grab_all())
-    assert adapter.interface.grabbed == [("F9", 0, 0), ("<Control><Alt>m", 0, 0)]
-    assert set(adapter.grabs.values()) == {"push_to_talk", "mode_switch"}
+    adapter._binding_ids = {"push_to_talk", "mode_switch"}
+    calls = []
+    existing = repr([_KB_BASE + "custom0/"])
+    monkeypatch.setattr(input_output.subprocess, "run", _gsettings_fake(existing, record=calls))
+
+    status = adapter._register()
+    assert status.state == AdapterState.READY
+
+    ptt = _KB_BASE + "witticism-push-to-talk/"
+    sets = [c for c in calls if c[:2] == ["gsettings", "set"]]
+    name = next(c for c in sets if ptt in c[2] and c[3] == "name")
+    assert name[4] == "Witticism push-to-talk"
+    command = next(c for c in sets if ptt in c[2] and c[3] == "command")
+    assert "--dest com.stannardlabs.Witticism" in command[4]
+    assert "--object-path /com/stannardlabs/Witticism" in command[4]
+    assert command[4].endswith("TriggerShortcut push_to_talk")
+    binding = next(c for c in sets if ptt in c[2] and c[3] == "binding")
+    assert binding[4] == "F9"
+    switch = next(c for c in sets if "witticism-mode-switch/" in c[2] and c[3] == "binding")
+    assert switch[4] == "<Control><Alt>m"
+
+    # The list write preserved the user entry and appended both of ours.
+    list_write = next(c for c in sets if c[3] == "custom-keybindings")
+    written = ast.literal_eval(list_write[4])
+    assert _KB_BASE + "custom0/" in written
+    assert ptt in written
+    assert _KB_BASE + "witticism-mode-switch/" in written
 
 
-def test_grab_accelerator_emits_activated_on_signal():
-    adapter = GrabAcceleratorShortcutAdapter()
-    adapter.interface = FakeGrabInterface()
+def test_keybinding_registration_refuses_to_clobber_unparseable_list(monkeypatch):
+    adapter = GnomeKeybindingShortcutAdapter()
     adapter.bindings = [ShortcutBinding("push_to_talk", "F9", ShortcutTrigger.HOLD)]
-    asyncio.run(adapter._grab_all())
-    events = []
-    adapter.on_event = events.append
-    action = next(iter(adapter.grabs))
-    adapter._on_accelerator_activated(action, {})
-    assert len(events) == 1
-    assert events[0].id == "push_to_talk"
-    assert events[0].type == ShortcutEventType.ACTIVATED
-    # This backend can never deliver a release event.
-    assert adapter.supports_hold is False
+    adapter._binding_ids = {"push_to_talk"}
+    sets = []
+
+    def run(cmd, **kwargs):
+        if cmd[:2] == ["gsettings", "get"]:
+            return _FakeProc(stdout="not-a-parseable-list")
+        if cmd[:2] == ["gsettings", "set"]:
+            sets.append(list(cmd))
+        return _FakeProc()
+
+    monkeypatch.setattr(input_output.subprocess, "run", run)
+    status = adapter._register()
+    assert status.state == AdapterState.FAILED
+    # Nothing was written: a non-empty unparseable list must never be clobbered.
+    assert sets == []
 
 
-def test_grab_accelerator_ungrabs_on_stop():
-    class SyncRuntime:
-        def __init__(self):
-            self.loop = object()
-
-        def submit(self, coroutine):
-            future = concurrent.futures.Future()
-            try:
-                future.set_result(asyncio.run(coroutine))
-            except Exception as exc:  # pragma: no cover - defensive
-                future.set_exception(exc)
-            return future
-
-        def stop(self):
-            self.loop = None
-
-    adapter = GrabAcceleratorShortcutAdapter(runtime=SyncRuntime())
-    interface = FakeGrabInterface()
-    adapter.interface = interface
+def test_keybinding_registration_treats_empty_as_list(monkeypatch):
+    adapter = GnomeKeybindingShortcutAdapter()
     adapter.bindings = [ShortcutBinding("push_to_talk", "F9", ShortcutTrigger.HOLD)]
-    asyncio.run(adapter._grab_all())
-    grabbed_actions = list(adapter.grabs)
+    adapter._binding_ids = {"push_to_talk"}
+    list_writes = []
+
+    def run(cmd, **kwargs):
+        if cmd[:2] == ["gsettings", "get"]:
+            return _FakeProc(stdout="@as []")  # the empty-array form
+        if cmd[:2] == ["gsettings", "set"] and cmd[3] == "custom-keybindings":
+            list_writes.append(ast.literal_eval(cmd[4]))
+        return _FakeProc()
+
+    monkeypatch.setattr(input_output.subprocess, "run", run)
+    status = adapter._register()
+    assert status.state == AdapterState.READY
+    assert list_writes[-1] == [_KB_BASE + "witticism-push-to-talk/"]
+
+
+def test_keybinding_registration_cleans_stale_entries(monkeypatch):
+    adapter = GnomeKeybindingShortcutAdapter()
+    adapter.bindings = [ShortcutBinding("push_to_talk", "F9", ShortcutTrigger.HOLD)]
+    adapter._binding_ids = {"push_to_talk"}
+    user = _KB_BASE + "custom0/"
+    stale = _KB_BASE + "witticism-old/"
+    existing = repr([user, stale])
+    resets = []
+    list_writes = []
+
+    def run(cmd, **kwargs):
+        if cmd[:2] == ["gsettings", "get"]:
+            return _FakeProc(stdout=existing)
+        if cmd[:2] == ["gsettings", "reset-recursively"]:
+            resets.append(cmd[2])
+        if cmd[:2] == ["gsettings", "set"] and cmd[3] == "custom-keybindings":
+            list_writes.append(ast.literal_eval(cmd[4]))
+        return _FakeProc()
+
+    monkeypatch.setattr(input_output.subprocess, "run", run)
+    status = adapter._register()
+    assert status.state == AdapterState.READY
+    final = list_writes[-1]
+    assert user in final                                  # user entry preserved
+    assert stale not in final                             # stale witticism entry dropped from list
+    assert _KB_BASE + "witticism-push-to-talk/" in final  # fresh entry added
+    assert any("witticism-old" in r for r in resets)      # stale relocatable entry reset
+
+
+def test_keybinding_stop_removes_only_our_entries(monkeypatch):
+    adapter = GnomeKeybindingShortcutAdapter()
+    adapter.bindings = [
+        ShortcutBinding("push_to_talk", "F9", ShortcutTrigger.HOLD),
+        ShortcutBinding("mode_switch", "Ctrl+Alt+M", ShortcutTrigger.ACTIVATE),
+    ]
+    adapter.bus = None  # no D-Bus teardown path
+    user = _KB_BASE + "custom0/"
+    ours1 = _KB_BASE + "witticism-push-to-talk/"
+    ours2 = _KB_BASE + "witticism-mode-switch/"
+    existing = repr([user, ours1, ours2])
+    list_writes = []
+
+    def run(cmd, **kwargs):
+        if cmd[:2] == ["gsettings", "get"]:
+            return _FakeProc(stdout=existing)
+        if cmd[:2] == ["gsettings", "set"] and cmd[3] == "custom-keybindings":
+            list_writes.append(ast.literal_eval(cmd[4]))
+        return _FakeProc()
+
+    monkeypatch.setattr(input_output.subprocess, "run", run)
     adapter.stop()
-    assert interface.ungrabbed == grabbed_actions
-    assert adapter.grabs == {}
+    final = list_writes[-1]
+    assert user in final
+    assert ours1 not in final and ours2 not in final
     assert adapter.status.state == AdapterState.STOPPED
 
 
-def test_grab_accelerator_status_degraded_outside_and_unavailable(monkeypatch):
-    monkeypatch.setenv("XDG_CURRENT_DESKTOP", "ubuntu:GNOME")
-    adapter = GrabAcceleratorShortcutAdapter()
-    status = adapter.probe()
-    assert status.state == AdapterState.DEGRADED
-    assert status.usable
-    assert "install-gnome-extension" in status.recovery_action
-    monkeypatch.setenv("XDG_CURRENT_DESKTOP", "KDE")
-    assert adapter.probe().state == AdapterState.UNAVAILABLE
+def test_keybinding_trigger_dispatch_known_and_unknown():
+    adapter = GnomeKeybindingShortcutAdapter()
+    adapter.bindings = [ShortcutBinding("push_to_talk", "F9", ShortcutTrigger.HOLD)]
+    adapter._binding_ids = {"push_to_talk"}
+    events = []
+    adapter.on_event = events.append
+    adapter._dispatch_trigger("push_to_talk")   # known -> ACTIVATED
+    adapter._dispatch_trigger("not_a_binding")  # unknown -> ignored
+    assert [e.id for e in events] == ["push_to_talk"]
+    assert events[0].type == ShortcutEventType.ACTIVATED
+    assert adapter.supports_hold is False
+
+
+def test_keybinding_control_interface_routes_to_dispatch():
+    pytest.importorskip("dbus_next")
+    received = []
+    control = input_output._build_control_interface(received.append)
+    control.TriggerShortcut("push_to_talk")
+    assert received == ["push_to_talk"]
 
 
 def test_hold_to_toggle_degradation_alternates_and_debounces(monkeypatch):

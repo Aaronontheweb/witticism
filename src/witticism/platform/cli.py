@@ -231,12 +231,33 @@ def _restore_grant_present():
         return False
 
 
+def _keybinding_registered():
+    """Whether Witticism's own GNOME custom keybinding entries are present.
+
+    Checks only for the presence of our ``witticism-`` entries; it never reads
+    or reports the names or paths of any other custom keybinding, so no private
+    user shortcut data leaks into diagnostics.
+    """
+    try:
+        result = subprocess.run(
+            ["gsettings", "get", "org.gnome.settings-daemon.plugins.media-keys", "custom-keybindings"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return False
+        return "witticism-" in (result.stdout or "")
+    except Exception:
+        return False
+
+
 def _shortcut_capability(backend, state, extension_loaded):
     """Map a shortcut backend to its user-facing capability tier."""
     b = (backend or "").lower()
     if state == "unavailable" or b in ("", "none"):
         return "unavailable"
-    if "grab" in b or "accelerator" in b:
+    if b == "gnome-media-keys" or "media-keys" in b or "keybinding" in b:
         return "press-to-toggle (fallback)"
     if b == "gnome-shell-extension":
         # The extension only delivers hold-to-talk once it is actually loaded in
@@ -295,6 +316,8 @@ def _render_doctor_text(report):
         f"running={yn(report['gnome_extension_loaded'])}",
         f"  Portal restore grant:    {yn(report['portal_restore_permission_present'])}",
     ]
+    if "gnome" in report["desktop"].lower():
+        lines.append(f"  GNOME keybinding:        registered={yn(report['keybinding_registered'])}")
     if report.get("how_to_improve"):
         lines += ["", f"  How to improve: {report['how_to_improve']}"]
     return "\n".join(lines)
@@ -306,6 +329,9 @@ def doctor(as_json=False):
     output_backend = _probe_output()
     extension_installed, extension_loaded = _probe_extension()
 
+    desktop = os.environ.get("XDG_CURRENT_DESKTOP", "unknown")
+    is_gnome = "gnome" in desktop.lower()
+
     capability = _shortcut_capability(shortcut_backend, shortcut_state, extension_loaded)
     if shortcut_backend == "gnome-shell-extension" and not extension_loaded:
         shortcut_state = "requires_action"
@@ -315,13 +341,14 @@ def doctor(as_json=False):
         "schema_version": 1,
         "operating_system": platform.system(),
         "display_protocol": os.environ.get("XDG_SESSION_TYPE", "unknown"),
-        "desktop": os.environ.get("XDG_CURRENT_DESKTOP", "unknown"),
+        "desktop": desktop,
         "global_shortcuts_portal": GLOBAL_SHORTCUTS in interfaces,
         "remote_desktop_portal": REMOTE_DESKTOP in interfaces,
         "shortcut_adapter": shortcut_backend,
         "shortcut_state": shortcut_state,
         "shortcut_recovery": shortcut_recovery,
         "shortcut_capability": capability,
+        "keybinding_registered": _keybinding_registered() if is_gnome else False,
         "output_adapter": output_backend,
         "output_capability": _output_capability(output_backend),
         "gnome_extension_installed": extension_installed,
