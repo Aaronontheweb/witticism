@@ -811,7 +811,7 @@ class SystemTrayApp(QSystemTrayIcon):
         if granted:
             if consent:
                 consent.grant()
-                self.autopaste_action.setVisible(consent.can_offer())
+                self._refresh_autopaste_action()
             self.show_notification(
                 "Automatic paste enabled",
                 "Dictated text will now be pasted into the active app.",
@@ -825,10 +825,20 @@ class SystemTrayApp(QSystemTrayIcon):
             )
 
     def _refresh_autopaste_action(self):
-        """Re-evaluate whether the 'Enable automatic paste...' item should show,
-        reflecting the current (possibly just-revoked) consent state."""
-        if self.autopaste_consent:
-            self.autopaste_action.setVisible(self.autopaste_consent.can_offer())
+        """Keep the auto-paste row visible whenever the platform supports it,
+        with the label carrying the state. A permanent status row is
+        discoverable after a revocation; an item that appears and disappears
+        reads as the feature being gone entirely."""
+        consent = self.autopaste_consent
+        if not consent:
+            return
+        self.autopaste_action.setVisible(consent.supported)
+        if consent.can_offer():
+            self.autopaste_action.setText("Automatic paste: off - click to enable...")
+            self.autopaste_action.setEnabled(True)
+        else:
+            self.autopaste_action.setText("Automatic paste: on")
+            self.autopaste_action.setEnabled(False)
 
     def _emit_autopaste_revoked(self):
         """Bridge the adapter's D-Bus-thread revocation callback to the GUI."""
@@ -1001,11 +1011,11 @@ class SystemTrayApp(QSystemTrayIcon):
         self.output_manager = output_manager
         self.config_manager = config_manager
 
-        # Auto-paste consent (Wayland only). The manual tray entry is shown when
-        # the feature is available and consent has not yet been granted.
+        # Auto-paste consent (Wayland only). The tray row is permanent wherever
+        # the feature is available; its label carries the on/off state.
         supported = bool(output_manager and output_manager.autopaste_supported())
         self.autopaste_consent = AutopasteConsent(config_manager, supported=supported)
-        self.autopaste_action.setVisible(self.autopaste_consent.can_offer())
+        self._refresh_autopaste_action()
         try:
             self.autopaste_result.connect(self._on_autopaste_result)
             self.autopaste_revoked.connect(self._on_autopaste_revoked)
