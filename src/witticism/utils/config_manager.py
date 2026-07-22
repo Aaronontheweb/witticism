@@ -95,6 +95,22 @@ class ConfigManager:
 
         return self.config
 
+    @staticmethod
+    def _normalize_accelerator(value: Any) -> Any:
+        """Normalize a legacy accelerator string to the canonical form.
+
+        Master stored mode-switch/toggle values in pynput's angle-bracket
+        style (e.g. ``"<ctrl>+<alt>+m"``). The accelerator parser expects
+        bare, lowercase tokens (``"ctrl+alt+m"``); angle-bracket tokens never
+        match and silently disable the hotkey. Strip surrounding ``<``/``>``
+        from each ``+``-separated token and lowercase. Non-strings pass
+        through unchanged; already-canonical values are returned as-is.
+        """
+        if not isinstance(value, str):
+            return value
+        tokens = [token.strip().strip("<>").lower() for token in value.split("+")]
+        return "+".join(tokens)
+
     def _migrate_user_config(self, user_config: Dict[str, Any]) -> bool:
         """Apply in-place, idempotent migrations to a raw user config.
 
@@ -102,15 +118,16 @@ class ConfigManager:
 
         Migration: ``hotkeys.toggle_enable`` was renamed to
         ``hotkeys.mode_switch``. If the user still has the old key, copy its
-        value over (unless ``mode_switch`` already exists, which wins), then
-        drop the dead key regardless.
+        value over normalized to the canonical accelerator form (unless
+        ``mode_switch`` already exists, which wins untouched), then drop the
+        dead key regardless.
         """
         hotkeys = user_config.get("hotkeys")
         if not isinstance(hotkeys, dict) or "toggle_enable" not in hotkeys:
             return False
 
         if "mode_switch" not in hotkeys:
-            hotkeys["mode_switch"] = hotkeys["toggle_enable"]
+            hotkeys["mode_switch"] = self._normalize_accelerator(hotkeys["toggle_enable"])
             logger.info("Migrated hotkeys.toggle_enable to hotkeys.mode_switch")
         del hotkeys["toggle_enable"]
         return True
