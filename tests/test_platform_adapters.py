@@ -6,6 +6,7 @@ import time
 
 import pytest
 
+from witticism.core import hotkey_manager
 from witticism.core.hotkey_manager import HotkeyManager
 from witticism.platform import input_output
 from witticism.platform.input_output import (
@@ -370,6 +371,31 @@ def test_grab_accelerator_translation():
     assert input_output._to_gnome_accelerator("Super+Shift+K") == "<Super><Shift>k"
 
 
+def test_split_accelerator_tolerates_legacy_bracket_format():
+    assert input_output._split_accelerator("<ctrl>+<alt>+m") == input_output._split_accelerator("ctrl+alt+m")
+    assert input_output._split_accelerator("<ctrl>+<alt>+m") == ({"ctrl", "alt"}, "m")
+
+
+def test_grab_accelerator_translation_tolerates_legacy_format():
+    assert input_output._to_gnome_accelerator("<ctrl>+<alt>+m") == "<Control><Alt>m"
+    assert input_output._to_gnome_accelerator("Ctrl+Alt+M") == "<Control><Alt>m"
+
+
+def test_pynput_matches_legacy_bracket_accelerator():
+    class MKey:
+        name = "m"
+        char = "m"
+
+    for accelerator in ("ctrl+alt+m", "<ctrl>+<alt>+m"):
+        adapter = PynputShortcutAdapter()
+        adapter.update_bindings([ShortcutBinding("switch", accelerator, ShortcutTrigger.ACTIVATE)])
+        events = []
+        adapter.on_event = events.append
+        adapter.pressed = {"ctrl", "alt"}
+        adapter._press(MKey())
+        assert [event.type.value for event in events] == ["activated"], accelerator
+
+
 def test_grab_accelerator_grabs_with_translated_accelerators():
     adapter = GrabAcceleratorShortcutAdapter()
     adapter.interface = FakeGrabInterface()
@@ -437,9 +463,11 @@ def test_grab_accelerator_status_degraded_outside_and_unavailable(monkeypatch):
     assert adapter.probe().state == AdapterState.UNAVAILABLE
 
 
-def test_hold_to_toggle_degradation_alternates_and_debounces():
+def test_hold_to_toggle_degradation_alternates_and_debounces(monkeypatch):
+    # Shrink the press-to-toggle floor so the timing assertions stay fast.
+    monkeypatch.setattr(hotkey_manager, "PRESS_TO_TOGGLE_DEBOUNCE_MS", 30)
     adapter = FakeNoHoldAdapter()
-    manager = HotkeyManager(DebounceConfig(50), adapter=adapter)
+    manager = HotkeyManager(DebounceConfig(1), adapter=adapter)
     assert manager.supports_hold is False
     calls = []
     manager.set_callbacks(lambda: calls.append("start"), lambda: calls.append("stop"))
@@ -449,17 +477,54 @@ def test_hold_to_toggle_degradation_alternates_and_debounces():
     adapter.emit("push_to_talk", ShortcutEventType.ACTIVATED)  # within debounce -> ignored
     assert calls == ["start"]
 
-    time.sleep(0.06)
+    time.sleep(0.05)
     adapter.emit("push_to_talk", ShortcutEventType.ACTIVATED)  # next press -> stop
     assert calls == ["start", "stop"]
 
-    time.sleep(0.06)
+    time.sleep(0.05)
     adapter.emit("push_to_talk", ShortcutEventType.ACTIVATED)  # press-to-toggle again -> start
     assert calls == ["start", "stop", "start"]
 
     # A stray release must be ignored (press-to-toggle backends never emit it).
     adapter.emit("push_to_talk", ShortcutEventType.DEACTIVATED)
     assert calls == ["start", "stop", "start"]
+
+
+def test_toggle_mode_works_on_press_only_backend(monkeypatch):
+    monkeypatch.setattr(hotkey_manager, "PRESS_TO_TOGGLE_DEBOUNCE_MS", 30)
+    adapter = FakeNoHoldAdapter()
+    manager = HotkeyManager(DebounceConfig(1), adapter=adapter)
+    manager.set_mode("toggle")
+    states = []
+    manager.set_callbacks(on_toggle_dictation=lambda active: states.append(active))
+    manager.start()
+
+    adapter.emit("push_to_talk", ShortcutEventType.ACTIVATED)  # dictation on
+    adapter.emit("push_to_talk", ShortcutEventType.ACTIVATED)  # within debounce -> ignored
+    assert states == [True]
+
+    time.sleep(0.05)
+    adapter.emit("push_to_talk", ShortcutEventType.ACTIVATED)  # dictation off
+    assert states == [True, False]
+
+    time.sleep(0.05)
+    adapter.emit("push_to_talk", ShortcutEventType.ACTIVATED)  # dictation on again
+    assert states == [True, False, True]
+
+
+def test_press_to_toggle_debounce_floor_blocks_fast_repeats():
+    # Even with a tiny configured ptt debounce, the 250ms floor guards repeats.
+    adapter = FakeNoHoldAdapter()
+    manager = HotkeyManager(DebounceConfig(1), adapter=adapter)
+    assert manager._press_to_toggle_debounce_ms() == hotkey_manager.PRESS_TO_TOGGLE_DEBOUNCE_MS
+    calls = []
+    manager.set_callbacks(lambda: calls.append("start"), lambda: calls.append("stop"))
+    manager.start()
+
+    adapter.emit("push_to_talk", ShortcutEventType.ACTIVATED)  # start
+    time.sleep(0.05)  # 50ms, well under the 250ms floor
+    adapter.emit("push_to_talk", ShortcutEventType.ACTIVATED)  # blocked by floor
+    assert calls == ["start"]
 
 
 def test_no_hold_adapter_mode_switch_unaffected():

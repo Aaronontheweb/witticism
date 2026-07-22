@@ -157,9 +157,28 @@ class UnavailableShortcutAdapter(ShortcutAdapter):
     def stop(self): pass
 
 
+def _accelerator_tokens(accelerator):
+    """Split an accelerator into (ordered modifier tokens, final key token).
+
+    Tolerates both our plain format ("Ctrl+Alt+M") and the legacy pynput-style
+    format that wraps tokens in angle brackets ("<ctrl>+<alt>+m"); the brackets
+    are stripped so both formats parse identically. This ordered parse is the
+    single source of truth consumed by both pynput matching and the GNOME
+    GrabAccelerator translation.
+    """
+    tokens = []
+    for raw in re.split(r"\+", accelerator):
+        token = raw.strip().strip("<>").strip()
+        if token:
+            tokens.append(token)
+    if not tokens:
+        return [], ""
+    return tokens[:-1], tokens[-1]
+
+
 def _split_accelerator(accelerator):
-    parts = [part.strip() for part in re.split(r"\+", accelerator) if part.strip()]
-    return {part.lower() for part in parts[:-1]}, parts[-1] if parts else ""
+    modifiers, key = _accelerator_tokens(accelerator)
+    return {modifier.lower() for modifier in modifiers}, key
 
 
 class PynputShortcutAdapter(ShortcutAdapter):
@@ -538,12 +557,12 @@ _GNOME_MODIFIER_MAP = {
 def _to_gnome_accelerator(accelerator):
     """Translate our accelerator format into a GNOME Shell accelerator string.
 
-    "F9" -> "F9"; "Ctrl+Alt+M" -> "<Control><Alt>m".
+    "F9" -> "F9"; "Ctrl+Alt+M" -> "<Control><Alt>m". Legacy pynput-style input
+    ("<ctrl>+<alt>+m") translates identically since it shares the same parse.
     """
-    parts = [part.strip() for part in accelerator.split("+") if part.strip()]
-    if not parts:
+    modifiers, key = _accelerator_tokens(accelerator)
+    if not key:
         return ""
-    *modifiers, key = parts
     prefix = "".join(_GNOME_MODIFIER_MAP.get(mod.lower(), f"<{mod}>") for mod in modifiers)
     if len(key) == 1:
         key = key.lower()
