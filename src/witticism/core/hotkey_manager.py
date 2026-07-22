@@ -1,5 +1,6 @@
 import logging
 import threading
+import time
 from typing import Callable, Optional
 
 from witticism.platform.input_output import (
@@ -33,10 +34,15 @@ class HotkeyManager:
         self.ptt_debounce_ms = int(self._configured("hotkeys.ptt_debounce_ms", DEFAULT_PTT_DEBOUNCE_MS))
         self._ptt_stop_timer: Optional[threading.Timer] = None
         self._ptt_timer_lock = threading.Lock()
+        self._last_toggle_press = 0.0
+        # Backends that cannot observe key-release (e.g. GNOME GrabAccelerator)
+        # advertise supports_hold=False; the manager then turns push-to-talk
+        # into press-to-toggle. Unknown/legacy adapters default to True.
+        self.supports_hold = bool(getattr(self.adapter, "supports_hold", True))
         self.status = self.adapter.probe()
         logger.info(
-            "[HOTKEY_MANAGER] INIT: mode=%s, ptt_key=%s, debounce=%sms, backend=%s",
-            self.mode, self.ptt_key, self.ptt_debounce_ms, self.status.backend,
+            "[HOTKEY_MANAGER] INIT: mode=%s, ptt_key=%s, debounce=%sms, backend=%s, supports_hold=%s",
+            self.mode, self.ptt_key, self.ptt_debounce_ms, self.status.backend, self.supports_hold,
         )
 
     def _configured(self, key, default):
@@ -92,14 +98,23 @@ class HotkeyManager:
             if event.id != "push_to_talk":
                 return
             if event.type == ShortcutEventType.ACTIVATED:
-                if self.mode == "push_to_talk":
-                    self._cancel_ptt_stop_timer()
-                    if not self.ptt_active:
-                        self.ptt_active = True
-                        if self.on_push_to_talk_start:
-                            self.on_push_to_talk_start()
+                if self.mode != "push_to_talk":
+                    return
+                if not self.supports_hold:
+                    # Press-to-toggle: this backend only ever delivers presses,
+                    # so alternate start/stop on successive activations.
+                    self._toggle_ptt_press()
+                    return
+                self._cancel_ptt_stop_timer()
+                if not self.ptt_active:
+                    self.ptt_active = True
+                    if self.on_push_to_talk_start:
+                        self.on_push_to_talk_start()
                 return
             if event.type != ShortcutEventType.DEACTIVATED:
+                return
+            if not self.supports_hold:
+                # Press-to-toggle backends never emit release events; ignore any.
                 return
             if self.mode == "push_to_talk" and self.ptt_active:
                 self._schedule_ptt_stop() if self.ptt_debounce_ms > 0 else self._do_ptt_stop()
@@ -109,6 +124,22 @@ class HotkeyManager:
                     self.on_toggle_dictation(self.dictation_active)
         except Exception:
             logger.exception("[HOTKEY_MANAGER] SHORTCUT_EVENT_ERROR")
+
+    def _toggle_ptt_press(self):
+        # Debounce rapid repeats (GrabAccelerator can auto-repeat while held) so
+        # a single physical press does not flip the recording state twice.
+        now = time.monotonic()
+        if (now - self._last_toggle_press) * 1000 < self.ptt_debounce_ms:
+            return
+        self._last_toggle_press = now
+        if not self.ptt_active:
+            self.ptt_active = True
+            if self.on_push_to_talk_start:
+                self.on_push_to_talk_start()
+        else:
+            self.ptt_active = False
+            if self.on_push_to_talk_stop:
+                self.on_push_to_talk_stop()
 
     def _schedule_ptt_stop(self):
         with self._ptt_timer_lock:
@@ -162,10 +193,3 @@ class HotkeyManager:
         old = self.mode
         self.mode = mode
         logger.info("[HOTKEY_MANAGER] MODE_CHANGED: from %s to %s", old, mode)
-
-
-class GlobalHotkeyManager(HotkeyManager):
-    """Compatibility alias; all adapters now support registered bindings."""
-
-    def register_global_hotkey(self, hotkey_str: str, callback: Callable):
-        logger.warning("register_global_hotkey is deprecated; use HotkeyManager callbacks")

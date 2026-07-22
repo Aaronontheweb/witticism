@@ -377,12 +377,22 @@ class WitticismApp:
 
         # Start hotkey manager
         self.hotkey_manager.start()
-        if not self.hotkey_manager.status.usable and self.tray_app:
-            status = self.hotkey_manager.status
+        status = self.hotkey_manager.status
+        if self.tray_app and not status.usable:
             guidance = f"\n\n{status.recovery_action}" if status.recovery_action else ""
             self.tray_app.showMessage(
                 "Witticism Platform Integration",
                 f"Push-to-talk is unavailable: {status.message or status.state.value}{guidance}",
+            )
+        elif self.tray_app and not self.hotkey_manager.supports_hold:
+            # Working, but this backend only supports press-to-toggle (no
+            # hold-to-talk). Keep the message informative, not alarming.
+            guidance = f"\n\n{status.recovery_action}" if status.recovery_action else ""
+            ptt_key = str(self.hotkey_manager.ptt_key).upper()
+            self.tray_app.showMessage(
+                "Witticism Hotkeys",
+                f"Hold-to-talk isn't available in this session. Press {ptt_key} once to "
+                f"start recording and again to stop.{guidance}",
             )
 
     def _force_cpu_mode_and_retry(self):
