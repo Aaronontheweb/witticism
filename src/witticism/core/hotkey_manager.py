@@ -13,6 +13,9 @@ from witticism.platform.input_output import (
 
 logger = logging.getLogger(__name__)
 DEFAULT_PTT_DEBOUNCE_MS = 30
+# Minimum debounce for press-to-toggle backends (no key-release signal). Must be
+# well above keyboard auto-repeat (~33ms) so a held key cannot flutter state.
+PRESS_TO_TOGGLE_DEBOUNCE_MS = 250
 
 
 class HotkeyManager:
@@ -98,12 +101,16 @@ class HotkeyManager:
             if event.id != "push_to_talk":
                 return
             if event.type == ShortcutEventType.ACTIVATED:
-                if self.mode != "push_to_talk":
-                    return
                 if not self.supports_hold:
-                    # Press-to-toggle: this backend only ever delivers presses,
-                    # so alternate start/stop on successive activations.
-                    self._toggle_ptt_press()
+                    # Press-only backend: the ACTIVATED press is the only signal
+                    # we ever get, so drive both modes from it. push_to_talk
+                    # alternates start/stop; toggle flips continuous dictation.
+                    if self.mode == "push_to_talk":
+                        self._toggle_ptt_press()
+                    elif self.mode == "toggle":
+                        self._toggle_dictation_press()
+                    return
+                if self.mode != "push_to_talk":
                     return
                 self._cancel_ptt_stop_timer()
                 if not self.ptt_active:
@@ -125,13 +132,24 @@ class HotkeyManager:
         except Exception:
             logger.exception("[HOTKEY_MANAGER] SHORTCUT_EVENT_ERROR")
 
-    def _toggle_ptt_press(self):
-        # Debounce rapid repeats (GrabAccelerator can auto-repeat while held) so
-        # a single physical press does not flip the recording state twice.
+    def _press_to_toggle_debounce_ms(self):
+        # Press-to-toggle needs a much larger guard than hold-to-talk's release
+        # debounce: keyboard auto-repeat fires roughly every ~33ms, so the 30ms
+        # default would let repeats flutter the recording state. No human
+        # intentionally toggles twice within a quarter second.
+        return max(self.ptt_debounce_ms, PRESS_TO_TOGGLE_DEBOUNCE_MS)
+
+    def _toggle_debounced(self):
+        """Return True if this press should act, updating the debounce clock."""
         now = time.monotonic()
-        if (now - self._last_toggle_press) * 1000 < self.ptt_debounce_ms:
-            return
+        if (now - self._last_toggle_press) * 1000 < self._press_to_toggle_debounce_ms():
+            return False
         self._last_toggle_press = now
+        return True
+
+    def _toggle_ptt_press(self):
+        if not self._toggle_debounced():
+            return
         if not self.ptt_active:
             self.ptt_active = True
             if self.on_push_to_talk_start:
@@ -140,6 +158,16 @@ class HotkeyManager:
             self.ptt_active = False
             if self.on_push_to_talk_stop:
                 self.on_push_to_talk_stop()
+
+    def _toggle_dictation_press(self):
+        # Toggle (continuous dictation) mode on a press-only backend: each press
+        # flips dictation on/off, mirroring the DEACTIVATED path used by
+        # hold-capable backends.
+        if not self._toggle_debounced():
+            return
+        self.dictation_active = not self.dictation_active
+        if self.on_toggle_dictation:
+            self.on_toggle_dictation(self.dictation_active)
 
     def _schedule_ptt_stop(self):
         with self._ptt_timer_lock:
