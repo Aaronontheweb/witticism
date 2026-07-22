@@ -902,45 +902,107 @@ class RemoteDesktopPasteAdapter(TextOutputAdapter):
         self.runtime.stop()
 
 
-# Shared runtime for lightweight, one-off D-Bus queries (portal introspection,
+# Shared runtime for lightweight, one-off D-Bus queries (portal probes,
 # name-owner probes) so we do not spawn a subprocess or an event loop per call.
 _query_runtime = _AsyncDbusRuntime()
-_PORTAL_INTERFACES_CACHE = None
+
+# Cache of definitive present/absent results per portal interface, kept for the
+# process lifetime (the portal surface does not change while the app runs).
+_PORTAL_INTERFACE_CACHE = {}
+
+# Known portal interfaces we probe (used by the portal_interfaces() helper that
+# the doctor command relies on).
+_KNOWN_PORTAL_INTERFACES = (GLOBAL_SHORTCUTS, REMOTE_DESKTOP)
+
+# D-Bus errors that definitively mean "this interface is not present" (as
+# opposed to a transport-level failure, which we must not cache).
+_PORTAL_ABSENT_ERRORS = frozenset(
+    {
+        "org.freedesktop.DBus.Error.InvalidArgs",
+        "org.freedesktop.DBus.Error.UnknownInterface",
+        "org.freedesktop.DBus.Error.UnknownProperty",
+        "org.freedesktop.DBus.Error.UnknownMethod",
+        "org.freedesktop.DBus.Error.UnknownObject",
+    }
+)
 
 
-async def _introspect_portal_interfaces():
-    from dbus_next.aio import MessageBus
+async def _probe_portal_interface(interface, bus=None):
+    """Return whether the desktop portal exposes ``interface``.
 
-    bus = await MessageBus().connect()
-    try:
-        node = await bus.introspect(PORTAL_BUS, PORTAL_PATH)
-        return {interface.name for interface in node.interfaces}
-    finally:
-        bus.disconnect()
+    Probes the single interface directly via
+    ``org.freedesktop.DBus.Properties.Get(interface, "version")`` on the portal
+    object, rather than parsing the full introspection document. Real
+    xdg-desktop-portal introspection XML can contain member names that violate
+    strict D-Bus rules (e.g. PowerProfileMonitor's ``power-saver-enabled``),
+    which makes dbus-next reject the ENTIRE document and hides every portal.
 
-
-def portal_interfaces():
-    """Return the set of portal interfaces the desktop exposes.
-
-    Uses a native D-Bus introspection call through dbus-next (no dependency on
-    the ``gdbus`` binary) and caches the result for the process lifetime, since
-    the portal surface does not change while the app runs. A failed lookup is
-    not cached so a transient failure can recover on the next call.
+    Returns True on a successful reply, False on a definitive "no such
+    interface" error, and RAISES on transport-level failures so the caller can
+    avoid caching a transient error.
     """
-    global _PORTAL_INTERFACES_CACHE
-    if _PORTAL_INTERFACES_CACHE is not None:
-        return _PORTAL_INTERFACES_CACHE
+    from dbus_next import Message, MessageType
+    from dbus_next.errors import DBusError
+
+    owns_bus = bus is None
+    if owns_bus:
+        from dbus_next.aio import MessageBus
+
+        bus = await MessageBus().connect()
     try:
-        interfaces = _query_runtime.submit(_introspect_portal_interfaces()).result(timeout=5)
-    except Exception as exc:
-        logger.warning("[PLATFORM_ADAPTER] Portal introspection failed: %s", exc)
-        return set()
-    _PORTAL_INTERFACES_CACHE = interfaces
-    return interfaces
+        try:
+            reply = await bus.call(
+                Message(
+                    destination=PORTAL_BUS,
+                    path=PORTAL_PATH,
+                    interface="org.freedesktop.DBus.Properties",
+                    member="Get",
+                    signature="ss",
+                    body=[interface, "version"],
+                )
+            )
+        except DBusError as exc:
+            if exc.type in _PORTAL_ABSENT_ERRORS:
+                return False
+            raise
+        # dbus-next's low-level call() returns the reply message rather than
+        # raising on an error reply, so inspect it explicitly.
+        if reply is not None and reply.message_type == MessageType.ERROR:
+            if reply.error_name in _PORTAL_ABSENT_ERRORS:
+                return False
+            raise DBusError(reply.error_name, reply.body[0] if reply.body else "", reply)
+        return True
+    finally:
+        if owns_bus:
+            bus.disconnect()
 
 
 def portal_has_interface(interface):
-    return interface in portal_interfaces()
+    """Whether the desktop portal exposes ``interface`` (cached per process).
+
+    Positive and definitive-negative results are cached for the process
+    lifetime; transport-level failures are not cached so a transient D-Bus
+    outage can recover on a later call.
+    """
+    if interface in _PORTAL_INTERFACE_CACHE:
+        return _PORTAL_INTERFACE_CACHE[interface]
+    try:
+        present = _query_runtime.submit(_probe_portal_interface(interface)).result(timeout=5)
+    except Exception as exc:
+        logger.warning("[PLATFORM_ADAPTER] Portal probe for %s failed: %s", interface, exc)
+        return False
+    _PORTAL_INTERFACE_CACHE[interface] = present
+    return present
+
+
+def portal_interfaces():
+    """Return the subset of known portal interfaces that are present.
+
+    Compatibility helper for callers (e.g. the ``doctor`` command) that expect a
+    set of interface names. Each interface is probed directly rather than by
+    parsing the full portal introspection tree.
+    """
+    return {name for name in _KNOWN_PORTAL_INTERFACES if portal_has_interface(name)}
 
 
 async def _name_has_owner(name):

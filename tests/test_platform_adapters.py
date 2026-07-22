@@ -488,3 +488,92 @@ def test_output_factory_honors_clipboard_mode(monkeypatch):
     assert isinstance(input_output.create_text_output_adapter(ClipboardCfg()), ClipboardTextOutputAdapter)
     # Without clipboard mode, X11 Linux still selects the pynput typer.
     assert input_output.create_text_output_adapter(TypeCfg()).__class__.__name__ == "PynputTextOutputAdapter"
+
+
+class FakeVersionReply:
+    """Stand-in for a dbus-next reply message (only the fields we inspect)."""
+
+    def __init__(self, message_type, error_name=None, body=None):
+        self.message_type = message_type
+        self.error_name = error_name
+        self.body = body or []
+
+
+def test_portal_probe_detects_per_interface_without_introspection():
+    pytest.importorskip("dbus_next")
+    from dbus_next import MessageType
+    from dbus_next.errors import DBusError
+
+    class FakeBus:
+        def __init__(self):
+            self.introspect_called = False
+            self.calls = []
+
+        async def call(self, msg):
+            # We must probe a single property, never introspect the whole tree.
+            assert msg.interface == "org.freedesktop.DBus.Properties"
+            assert msg.member == "Get"
+            interface, prop = msg.body
+            assert prop == "version"
+            self.calls.append(interface)
+            if interface == input_output.REMOTE_DESKTOP:
+                return FakeVersionReply(MessageType.METHOD_RETURN)
+            if interface == input_output.GLOBAL_SHORTCUTS:
+                # Real xdg-desktop-portal answers a missing interface this way.
+                return FakeVersionReply(
+                    MessageType.ERROR, error_name="org.freedesktop.DBus.Error.InvalidArgs"
+                )
+            raise DBusError("org.freedesktop.DBus.Error.ServiceUnknown", "no portal", None)
+
+        def introspect(self, *args, **kwargs):
+            self.introspect_called = True
+            raise AssertionError("must not introspect the full portal tree")
+
+        def disconnect(self):
+            pass
+
+    bus = FakeBus()
+    # Present interface -> True even though full introspection would explode.
+    assert asyncio.run(input_output._probe_portal_interface(input_output.REMOTE_DESKTOP, bus=bus)) is True
+    # Definitively-absent interface (InvalidArgs) -> False, not an error.
+    assert asyncio.run(input_output._probe_portal_interface(input_output.GLOBAL_SHORTCUTS, bus=bus)) is False
+    assert bus.introspect_called is False
+    assert bus.calls == [input_output.REMOTE_DESKTOP, input_output.GLOBAL_SHORTCUTS]
+
+
+def test_portal_probe_raises_on_transport_error():
+    pytest.importorskip("dbus_next")
+    from dbus_next.errors import DBusError
+
+    class BrokenBus:
+        async def call(self, msg):
+            raise DBusError("org.freedesktop.DBus.Error.NoReply", "timed out", None)
+
+        def disconnect(self):
+            pass
+
+    # Transport-level failures must propagate so the caller does not cache them.
+    with pytest.raises(DBusError):
+        asyncio.run(input_output._probe_portal_interface(input_output.REMOTE_DESKTOP, bus=BrokenBus()))
+
+
+def test_portal_has_interface_caches_positive_and_negative(monkeypatch):
+    input_output._PORTAL_INTERFACE_CACHE.clear()
+    probed = []
+
+    async def fake_probe(interface, bus=None):
+        probed.append(interface)
+        return interface == input_output.REMOTE_DESKTOP
+
+    monkeypatch.setattr(input_output, "_probe_portal_interface", fake_probe)
+
+    assert input_output.portal_has_interface(input_output.REMOTE_DESKTOP) is True
+    assert input_output.portal_has_interface(input_output.REMOTE_DESKTOP) is True
+    assert input_output.portal_has_interface(input_output.GLOBAL_SHORTCUTS) is False
+    assert input_output.portal_has_interface(input_output.GLOBAL_SHORTCUTS) is False
+    # Both positive and definitive-negative results are cached: one probe each.
+    assert probed == [input_output.REMOTE_DESKTOP, input_output.GLOBAL_SHORTCUTS]
+
+    # portal_interfaces() reflects the cached subset that is present.
+    assert input_output.portal_interfaces() == {input_output.REMOTE_DESKTOP}
+    input_output._PORTAL_INTERFACE_CACHE.clear()
