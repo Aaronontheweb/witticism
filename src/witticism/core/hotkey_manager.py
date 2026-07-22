@@ -38,9 +38,9 @@ class HotkeyManager:
         self._ptt_stop_timer: Optional[threading.Timer] = None
         self._ptt_timer_lock = threading.Lock()
         self._last_toggle_press = 0.0
-        # Backends that cannot observe key-release (e.g. GNOME GrabAccelerator)
-        # advertise supports_hold=False; the manager then turns push-to-talk
-        # into press-to-toggle. Unknown/legacy adapters default to True.
+        # Backends that cannot observe key-release (e.g. a GNOME custom
+        # keyboard shortcut) advertise supports_hold=False; the manager then
+        # turns push-to-talk into press-to-toggle. Unknown adapters default True.
         self.supports_hold = bool(getattr(self.adapter, "supports_hold", True))
         self.status = self.adapter.probe()
         logger.info(

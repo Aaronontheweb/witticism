@@ -124,7 +124,7 @@ class OutputResult:
 class ShortcutAdapter(ABC):
     #: Whether this backend can distinguish key-press from key-release, i.e.
     #: support genuine hold-to-talk. Backends that only deliver press events
-    #: (e.g. GNOME Shell GrabAccelerator) set this to False so the hotkey
+    #: (e.g. a GNOME custom keyboard shortcut) set this to False so the hotkey
     #: manager can fall back to press-to-toggle.
     supports_hold: bool = True
 
@@ -172,7 +172,7 @@ def _accelerator_tokens(accelerator):
     format that wraps tokens in angle brackets ("<ctrl>+<alt>+m"); the brackets
     are stripped so both formats parse identically. This ordered parse is the
     single source of truth consumed by both pynput matching and the GNOME
-    GrabAccelerator translation.
+    accelerator translation (``_to_gnome_accelerator``).
     """
     tokens = []
     for raw in re.split(r"\+", accelerator):
