@@ -36,7 +36,7 @@ Witticism works out of the box, with full hold-to-talk (hold the hotkey to recor
 - **Linux X11**
 - **Linux Wayland with the GlobalShortcuts portal** - KDE Plasma and GNOME 48+
 
-On **GNOME 46 / 47 Wayland**, which do not yet expose that portal, Witticism still works out of the box in **press-to-toggle** mode: press the hotkey once to start recording, and again to stop. For true hold-to-talk on these versions you can optionally install a small GNOME Shell extension:
+On **GNOME 46 / 47 Wayland**, which do not yet expose that portal, Witticism still works out of the box in **press-to-toggle** mode: press the hotkey once to start recording, and again to stop. It does this by registering a standard GNOME custom keyboard shortcut (the same kind you can create in Settings > Keyboard > Custom Shortcuts) - no install, no logout, and you can see and edit it there; it is removed when Witticism exits. For true hold-to-talk on these versions you can optionally install a small GNOME Shell extension:
 
 ```bash
 witticism-platform install-gnome-extension
@@ -44,7 +44,7 @@ witticism-platform install-gnome-extension
 
 This step is entirely opt-in, prompts for confirmation, and requires you to **log out and back in** before it takes effect. The installer never deploys it for you.
 
-On Wayland, transcribed text is delivered by copying it to the clipboard and pasting with Ctrl+V through a keyboard-only portal session. The first paste triggers a **one-time system permission prompt**; if you decline, Witticism keeps the text on your clipboard so you can paste it yourself.
+On Wayland, transcribed text is **copied to your clipboard by default** - just paste it with Ctrl+V. There are **no permission dialogs** at startup. If you'd like Witticism to paste for you automatically, you can optionally enable that from the tray menu; it uses a one-time GNOME permission (a system dialog titled "Remote Desktop", covering keyboard input only) and Witticism will explain what to expect before it appears. You can turn it off again at any time.
 
 Run `witticism-platform doctor` at any time to see which backends are active and how to improve them. See [docs/platform-adapters.md](docs/platform-adapters.md) for the full support matrix.
 
@@ -84,7 +84,7 @@ If you prefer to install manually:
 ### Prerequisites
 
 - **Linux** (Ubuntu, Fedora, Debian, etc.)
-- **Linux display integration**: X11, Wayland with the GlobalShortcuts portal (KDE, GNOME 48+), or GNOME 46/47 Wayland (press-to-toggle by default; optional extension for hold-to-talk). See [Platform support](#platform-support).
+- **Linux display integration**: X11, Wayland with the GlobalShortcuts portal (KDE, GNOME 48+), or GNOME 46/47 Wayland (press-to-toggle out of the box via a standard GNOME custom keyboard shortcut; optional extension for hold-to-talk). See [Platform support](#platform-support).
 - **Python 3.10-3.12** (pipx will handle this)
 - **NVIDIA GPU** (optional but recommended for faster transcription)
 
