@@ -1060,3 +1060,15 @@ def test_portal_has_interface_caches_positive_and_negative(monkeypatch):
     # portal_interfaces() reflects the cached subset that is present.
     assert input_output.portal_interfaces() == {input_output.REMOTE_DESKTOP}
     input_output._PORTAL_INTERFACE_CACHE.clear()
+
+
+def test_parse_uint_ignores_gsettings_type_annotation():
+    # Regression: "uint32 500" must parse as 500, not the 32 inside "uint32".
+    # The wrong value made the repeat tracker's tap window ~0.26s instead of
+    # ~0.72s, cutting every hold into a phantom short recording plus a restart.
+    from witticism.platform.input_output import _parse_uint
+    assert _parse_uint("uint32 500", 0) == 500
+    assert _parse_uint("uint32 30", 0) == 30
+    assert _parse_uint("500", 0) == 500
+    assert _parse_uint("", 123) == 123
+    assert _parse_uint(None, 123) == 123

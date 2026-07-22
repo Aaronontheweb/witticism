@@ -610,10 +610,11 @@ def _build_control_interface(dispatch):
 
 
 def _parse_uint(text, default):
-    """Extract the first unsigned integer from a gsettings value (e.g. the
-    ``500`` in ``"uint32 500"``); return ``default`` when there is none."""
-    match = re.search(r"\d+", text or "")
-    return int(match.group()) if match else default
+    """Extract the value from a typed gsettings scalar (e.g. the ``500`` in
+    ``"uint32 500"``); return ``default`` when there is none. The value is the
+    LAST integer - the type annotation itself contains digits (``uint32``)."""
+    matches = re.findall(r"\d+", text or "")
+    return int(matches[-1]) if matches else default
 
 
 class _RepeatStreamTracker:
