@@ -101,6 +101,7 @@ def test_doctor_json_has_expected_keys_and_no_forbidden_names(monkeypatch, capsy
     monkeypatch.setattr(cli, "_probe_extension", lambda: (False, False))
     monkeypatch.setattr(cli, "_restore_grant_present", lambda: False)
     monkeypatch.setattr(cli, "_keybinding_registered", lambda: False)
+    monkeypatch.setattr(cli, "_keyboard_repeat_enabled", lambda: True)
 
     rc = cli.doctor(as_json=True)
     assert rc == 0
@@ -132,14 +133,16 @@ def test_doctor_json_has_expected_keys_and_no_forbidden_names(monkeypatch, capsy
         assert forbidden not in blob
 
 
-def test_doctor_reports_press_to_toggle_fallback_tier(monkeypatch, capsys):
+def test_doctor_reports_press_to_toggle_when_key_repeat_disabled(monkeypatch, capsys):
     monkeypatch.setattr(cli, "_safe_portal_interfaces", lambda: set())
-    # Simulate the GNOME custom-keybinding (media-keys) press-to-toggle backend.
+    # GNOME custom-keybinding backend, but key auto-repeat is off -> no hold
+    # inference, so it degrades to press-to-toggle.
     monkeypatch.setattr(cli, "_probe_shortcut", lambda: ("gnome-media-keys", "ready", None))
     monkeypatch.setattr(cli, "_probe_output", lambda: "clipboard")
     monkeypatch.setattr(cli, "_probe_extension", lambda: (False, False))
     monkeypatch.setattr(cli, "_restore_grant_present", lambda: False)
     monkeypatch.setattr(cli, "_keybinding_registered", lambda: True)
+    monkeypatch.setattr(cli, "_keyboard_repeat_enabled", lambda: False)
     monkeypatch.setenv("XDG_CURRENT_DESKTOP", "GNOME")
 
     rc = cli.doctor(as_json=True)
@@ -147,8 +150,27 @@ def test_doctor_reports_press_to_toggle_fallback_tier(monkeypatch, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["shortcut_capability"] == "press-to-toggle (fallback)"
     assert payload["keybinding_registered"] is True
-    # Degraded GNOME session should guide the user toward the optional extension.
+    assert payload["keyboard_repeat_enabled"] is False
+    # Press-to-toggle GNOME session should guide toward the optional extension.
     assert "install-gnome-extension" in payload["how_to_improve"]
+
+
+def test_doctor_reports_hold_to_talk_when_key_repeat_enabled(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_safe_portal_interfaces", lambda: set())
+    monkeypatch.setattr(cli, "_probe_shortcut", lambda: ("gnome-media-keys", "ready", None))
+    monkeypatch.setattr(cli, "_probe_output", lambda: "clipboard")
+    monkeypatch.setattr(cli, "_probe_extension", lambda: (False, False))
+    monkeypatch.setattr(cli, "_restore_grant_present", lambda: False)
+    monkeypatch.setattr(cli, "_keybinding_registered", lambda: True)
+    monkeypatch.setattr(cli, "_keyboard_repeat_enabled", lambda: True)
+    monkeypatch.setenv("XDG_CURRENT_DESKTOP", "GNOME")
+
+    rc = cli.doctor(as_json=True)
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    # Key repeat present -> the custom-keybinding backend infers hold-to-talk.
+    assert payload["shortcut_capability"] == "hold-to-talk"
+    assert payload["keyboard_repeat_enabled"] is True
 
 
 def test_doctor_reports_portal_paste_when_autopaste_granted(monkeypatch, capsys):
@@ -159,6 +181,7 @@ def test_doctor_reports_portal_paste_when_autopaste_granted(monkeypatch, capsys)
     monkeypatch.setattr(cli, "_restore_grant_present", lambda: True)
     monkeypatch.setattr(cli, "_autopaste_consent", lambda: "granted")
     monkeypatch.setattr(cli, "_keybinding_registered", lambda: False)
+    monkeypatch.setattr(cli, "_keyboard_repeat_enabled", lambda: True)
 
     rc = cli.doctor(as_json=True)
     assert rc == 0
@@ -176,6 +199,7 @@ def test_doctor_output_clipboard_and_hint_when_autopaste_unset(monkeypatch, caps
     monkeypatch.setattr(cli, "_restore_grant_present", lambda: False)
     monkeypatch.setattr(cli, "_autopaste_consent", lambda: "unset")
     monkeypatch.setattr(cli, "_keybinding_registered", lambda: False)
+    monkeypatch.setattr(cli, "_keyboard_repeat_enabled", lambda: True)
     monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
     monkeypatch.setenv("XDG_CURRENT_DESKTOP", "GNOME")
 

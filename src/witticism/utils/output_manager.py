@@ -26,6 +26,12 @@ class OutputManager:
         """
         return hasattr(self.adapter, "request_autopaste")
 
+    def set_autopaste_revoked_callback(self, callback) -> None:
+        """Register a callback fired when auto-paste is lost mid-session (e.g.
+        revoked from the system indicator). No-op if unsupported."""
+        if hasattr(self.adapter, "on_revoked"):
+            self.adapter.on_revoked = callback
+
     def request_autopaste(self, on_result=None) -> bool:
         """Ask the adapter to start a portal session (the only place GNOME's
         permission dialog may appear). Returns False if unsupported.

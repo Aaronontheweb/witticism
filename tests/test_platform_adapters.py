@@ -135,9 +135,12 @@ def test_wayland_factory_uses_keybinding_adapter_without_extension(monkeypatch):
     monkeypatch.setenv("XDG_CURRENT_DESKTOP", "ubuntu:GNOME")
     monkeypatch.setattr(input_output, "portal_has_interface", lambda _name: False)
     monkeypatch.setattr(input_output, "_dbus_name_has_owner", lambda _name: False)
+    # The adapter reads keyboard-repeat settings in __init__; mock gsettings so
+    # the test never touches the real desktop. Repeat on -> hold-to-talk.
+    monkeypatch.setattr(input_output.subprocess, "run", _keyboard_repeat_gsettings(True))
     adapter = input_output.create_shortcut_adapter()
     assert isinstance(adapter, GnomeKeybindingShortcutAdapter)
-    assert adapter.supports_hold is False
+    assert adapter.supports_hold is True
     status = adapter.probe()
     assert status.usable
     assert "install-gnome-extension" in (status.recovery_action or "")
@@ -436,6 +439,79 @@ def test_wayland_output_adapter_receives_config(monkeypatch):
     assert adapter._consent_state() == "granted"
 
 
+# ---------------------------------------------------------------------------
+# Mid-session revocation: the portal Session Closed signal (e.g. the user turns
+# auto-paste off from GNOME's system indicator) must degrade cleanly and reset
+# consent so the tray offer reappears.
+# ---------------------------------------------------------------------------
+
+class _WritableConfig:
+    def __init__(self, values=None):
+        self.values = dict(values or {})
+
+    def get(self, key, default=None):
+        return self.values.get(key, default)
+
+    def set(self, key, value):
+        self.values[key] = value
+
+
+def test_session_closed_revokes_resets_consent_and_deletes_token(tmp_path):
+    cfg = _WritableConfig({"output.autopaste": "granted"})
+    adapter = RemoteDesktopPasteAdapter(cfg)
+    adapter.token_file = tmp_path / "wayland-portal.json"
+    adapter.token_file.write_text('{"restore_token": "tok"}')
+    adapter.ready = True
+    adapter.session = "/session/1"
+    notified = []
+    adapter.on_revoked = lambda: notified.append(True)
+
+    adapter._on_session_closed({})  # the portal Closed signal fires
+
+    assert adapter.ready is False
+    assert adapter.session is None
+    assert adapter.status.state == AdapterState.DEGRADED
+    assert adapter.status.backend == "clipboard"
+    assert "system indicator" in (adapter.status.message or "")
+    # Consent reset + dead token removed so re-enabling runs the full flow again.
+    assert cfg.values["output.autopaste"] == "unset"
+    assert not adapter.token_file.exists()
+    assert notified == [True]  # UI told to re-surface the "Enable..." offer
+
+
+def test_paste_failure_degrades_without_exception(monkeypatch):
+    adapter = RemoteDesktopPasteAdapter()
+    adapter.ready = True
+    notified = []
+    adapter.on_revoked = lambda: notified.append(True)
+    # Clipboard copy happens before the paste is dispatched, so the transcript
+    # is already delivered even when the (gone) session makes the paste fail.
+    monkeypatch.setattr(input_output, "_clipboard", lambda text: OutputResult(True, False))
+
+    class GoneRuntime:
+        loop = object()
+
+        def submit(self, coroutine):
+            coroutine.close()  # do not run the paste coroutine
+            future = concurrent.futures.Future()
+            future.set_exception(RuntimeError("session is gone"))
+            return future
+
+        def stop(self):
+            self.loop = None
+
+    adapter.runtime = GoneRuntime()
+    result = adapter.output_text("hello world")
+
+    # No exception surfaced; the clipboard copy succeeded.
+    assert result.success is True
+    # The failed paste degraded to clipboard and notified the UI.
+    assert adapter.ready is False
+    assert adapter.status.state == AdapterState.DEGRADED
+    assert adapter.status.backend == "clipboard"
+    assert notified == [True]
+
+
 def test_trigger_is_honored_in_pynput_adapter():
     class Key:
         name = "f9"
@@ -518,8 +594,24 @@ def _gsettings_fake(list_value="@as []", record=None):
     return run
 
 
+def _keyboard_repeat_gsettings(repeat=True, delay=500, interval=30):
+    """Fake ``subprocess.run`` answering the three keyboard-repeat gsettings
+    reads the keybinding adapter performs in __init__."""
+    values = {
+        "repeat": "true" if repeat else "false",
+        "delay": f"uint32 {delay}",
+        "repeat-interval": f"uint32 {interval}",
+    }
+
+    def run(cmd, **kwargs):
+        if cmd[:2] == ["gsettings", "get"] and cmd[-1] in values:
+            return _FakeProc(stdout=values[cmd[-1]])
+        return _FakeProc()
+    return run
+
+
 def test_keybinding_registration_writes_entries_and_preserves_list(monkeypatch):
-    adapter = GnomeKeybindingShortcutAdapter()
+    adapter = GnomeKeybindingShortcutAdapter(keyboard_repeat=(True, 500, 30))
     adapter.bindings = [
         ShortcutBinding("push_to_talk", "F9", ShortcutTrigger.HOLD),
         ShortcutBinding("mode_switch", "Ctrl+Alt+M", ShortcutTrigger.ACTIVATE),
@@ -554,7 +646,7 @@ def test_keybinding_registration_writes_entries_and_preserves_list(monkeypatch):
 
 
 def test_keybinding_registration_refuses_to_clobber_unparseable_list(monkeypatch):
-    adapter = GnomeKeybindingShortcutAdapter()
+    adapter = GnomeKeybindingShortcutAdapter(keyboard_repeat=(True, 500, 30))
     adapter.bindings = [ShortcutBinding("push_to_talk", "F9", ShortcutTrigger.HOLD)]
     adapter._binding_ids = {"push_to_talk"}
     sets = []
@@ -574,7 +666,7 @@ def test_keybinding_registration_refuses_to_clobber_unparseable_list(monkeypatch
 
 
 def test_keybinding_registration_treats_empty_as_list(monkeypatch):
-    adapter = GnomeKeybindingShortcutAdapter()
+    adapter = GnomeKeybindingShortcutAdapter(keyboard_repeat=(True, 500, 30))
     adapter.bindings = [ShortcutBinding("push_to_talk", "F9", ShortcutTrigger.HOLD)]
     adapter._binding_ids = {"push_to_talk"}
     list_writes = []
@@ -593,7 +685,7 @@ def test_keybinding_registration_treats_empty_as_list(monkeypatch):
 
 
 def test_keybinding_registration_cleans_stale_entries(monkeypatch):
-    adapter = GnomeKeybindingShortcutAdapter()
+    adapter = GnomeKeybindingShortcutAdapter(keyboard_repeat=(True, 500, 30))
     adapter.bindings = [ShortcutBinding("push_to_talk", "F9", ShortcutTrigger.HOLD)]
     adapter._binding_ids = {"push_to_talk"}
     user = _KB_BASE + "custom0/"
@@ -622,7 +714,7 @@ def test_keybinding_registration_cleans_stale_entries(monkeypatch):
 
 
 def test_keybinding_stop_removes_only_our_entries(monkeypatch):
-    adapter = GnomeKeybindingShortcutAdapter()
+    adapter = GnomeKeybindingShortcutAdapter(keyboard_repeat=(True, 500, 30))
     adapter.bindings = [
         ShortcutBinding("push_to_talk", "F9", ShortcutTrigger.HOLD),
         ShortcutBinding("mode_switch", "Ctrl+Alt+M", ShortcutTrigger.ACTIVATE),
@@ -649,17 +741,39 @@ def test_keybinding_stop_removes_only_our_entries(monkeypatch):
     assert adapter.status.state == AdapterState.STOPPED
 
 
-def test_keybinding_trigger_dispatch_known_and_unknown():
-    adapter = GnomeKeybindingShortcutAdapter()
+def test_keybinding_repeat_disabled_is_press_to_toggle():
+    adapter = GnomeKeybindingShortcutAdapter(keyboard_repeat=(False, 500, 30))
+    assert adapter.supports_hold is False
+    assert adapter._tracker is None
     adapter.bindings = [ShortcutBinding("push_to_talk", "F9", ShortcutTrigger.HOLD)]
     adapter._binding_ids = {"push_to_talk"}
     events = []
     adapter.on_event = events.append
-    adapter._dispatch_trigger("push_to_talk")   # known -> ACTIVATED
+    adapter._dispatch_trigger("push_to_talk")   # press-only: single ACTIVATED
     adapter._dispatch_trigger("not_a_binding")  # unknown -> ignored
     assert [e.id for e in events] == ["push_to_talk"]
     assert events[0].type == ShortcutEventType.ACTIVATED
-    assert adapter.supports_hold is False
+
+
+def test_keybinding_repeat_enabled_supports_hold_and_routes_to_tracker():
+    adapter = GnomeKeybindingShortcutAdapter(keyboard_repeat=(True, 500, 30))
+    assert adapter.supports_hold is True
+    adapter._binding_ids = {"push_to_talk"}
+
+    class _FakeTracker:
+        def __init__(self):
+            self.seen = []
+
+        def on_event(self, binding_id):
+            self.seen.append(binding_id)
+
+    adapter._tracker = _FakeTracker()
+    events = []
+    adapter.on_event = events.append
+    adapter._dispatch_trigger("push_to_talk")   # routed to tracker, not emitted directly
+    adapter._dispatch_trigger("not_a_binding")  # unknown -> ignored, not routed
+    assert adapter._tracker.seen == ["push_to_talk"]
+    assert events == []  # the tracker owns emission
 
 
 def test_keybinding_control_interface_routes_to_dispatch():
@@ -668,6 +782,103 @@ def test_keybinding_control_interface_routes_to_dispatch():
     control = input_output._build_control_interface(received.append)
     control.TriggerShortcut("push_to_talk")
     assert received == ["push_to_talk"]
+
+
+# ---------------------------------------------------------------------------
+# Repeat-stream hold inference: a GNOME custom shortcut fires once per key
+# auto-repeat; the tracker turns that stream into ACTIVATED/DEACTIVATED.
+# ---------------------------------------------------------------------------
+
+class _FakeHandle:
+    def __init__(self, seconds, callback):
+        self.seconds = seconds
+        self.callback = callback
+        self.cancelled = False
+
+    def cancel(self):
+        self.cancelled = True
+
+
+class _FakeScheduler:
+    def __init__(self):
+        self.handles = []
+
+    def __call__(self, seconds, callback):
+        handle = _FakeHandle(seconds, callback)
+        self.handles.append(handle)
+        return handle
+
+    def live(self):
+        return [h for h in self.handles if not h.cancelled]
+
+    def fire_live(self):
+        # Fire the still-live timers (each re-arm cancels the previous one, so
+        # per binding only the latest survives).
+        for handle in self.live():
+            handle.cancelled = True
+            handle.callback()
+
+
+def _tracker(triggers, delay=500, interval=30):
+    events = []
+    sched = _FakeScheduler()
+    tracker = input_output._RepeatStreamTracker(
+        triggers, lambda bid, et: events.append((bid, et)), delay, interval, sched,
+    )
+    return tracker, events, sched
+
+
+def test_repeat_tracker_tap_emits_activated_then_deactivated():
+    tracker, events, sched = _tracker({"push_to_talk": ShortcutTrigger.HOLD})
+    tracker.on_event("push_to_talk")  # single tap event, then silence
+    assert events == [("push_to_talk", ShortcutEventType.ACTIVATED)]
+    # Tap window bridges the first-repeat gap: 0.5 + 4*0.03 + 0.1 = 0.72s.
+    assert sched.live()[-1].seconds == pytest.approx(0.72)
+    sched.fire_live()
+    assert events == [
+        ("push_to_talk", ShortcutEventType.ACTIVATED),
+        ("push_to_talk", ShortcutEventType.DEACTIVATED),
+    ]
+
+
+def test_repeat_tracker_hold_single_activated_single_deactivated():
+    tracker, events, sched = _tracker({"push_to_talk": ShortcutTrigger.HOLD})
+    # First press + three repeats (0, 500, 530, 560), then release => silence.
+    for _ in range(4):
+        tracker.on_event("push_to_talk")
+    # Exactly one ACTIVATED so far, no DEACTIVATED, no intermediate events.
+    assert events == [("push_to_talk", ShortcutEventType.ACTIVATED)]
+    live = sched.live()
+    assert len(live) == 1                          # only the latest timer is live
+    assert live[0].seconds == pytest.approx(0.22)  # quiet window 4*0.03 + 0.1
+    sched.fire_live()                              # the stream went quiet => release
+    assert events == [
+        ("push_to_talk", ShortcutEventType.ACTIVATED),
+        ("push_to_talk", ShortcutEventType.DEACTIVATED),
+    ]
+
+
+def test_repeat_tracker_activate_swallows_repeats_no_deactivated():
+    tracker, events, sched = _tracker({"mode_switch": ShortcutTrigger.ACTIVATE})
+    for _ in range(4):
+        tracker.on_event("mode_switch")
+    assert events == [("mode_switch", ShortcutEventType.ACTIVATED)]
+    sched.fire_live()
+    # ACTIVATE triggers never emit DEACTIVATED.
+    assert events == [("mode_switch", ShortcutEventType.ACTIVATED)]
+    # A later tap starts a fresh stream -> ACTIVATED again.
+    tracker.on_event("mode_switch")
+    assert events == [
+        ("mode_switch", ShortcutEventType.ACTIVATED),
+        ("mode_switch", ShortcutEventType.ACTIVATED),
+    ]
+
+
+def test_repeat_tracker_ignores_unknown_binding():
+    tracker, events, sched = _tracker({"push_to_talk": ShortcutTrigger.HOLD})
+    tracker.on_event("mystery")
+    assert events == []
+    assert sched.handles == []
 
 
 def test_hold_to_toggle_degradation_alternates_and_debounces(monkeypatch):

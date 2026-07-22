@@ -269,13 +269,32 @@ def _keybinding_registered():
         return False
 
 
-def _shortcut_capability(backend, state, extension_loaded):
+def _keyboard_repeat_enabled():
+    """Whether GNOME key auto-repeat is on (the custom-keybinding backend needs
+    it to infer hold-to-talk). Defaults to True when it cannot be determined."""
+    try:
+        result = subprocess.run(
+            ["gsettings", "get", "org.gnome.desktop.peripherals.keyboard", "repeat"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return True
+        return "false" not in (result.stdout or "").strip().lower()
+    except Exception:
+        return True
+
+
+def _shortcut_capability(backend, state, extension_loaded, keyboard_repeat=True):
     """Map a shortcut backend to its user-facing capability tier."""
     b = (backend or "").lower()
     if state == "unavailable" or b in ("", "none"):
         return "unavailable"
     if b == "gnome-media-keys" or "media-keys" in b or "keybinding" in b:
-        return "press-to-toggle (fallback)"
+        # The custom-keybinding backend infers hold-to-talk from the key-repeat
+        # stream; without key repeat it can only do press-to-toggle.
+        return "hold-to-talk" if keyboard_repeat else "press-to-toggle (fallback)"
     if b == "gnome-shell-extension":
         # The extension only delivers hold-to-talk once it is actually loaded in
         # the running Shell, which requires a fresh login after installation.
@@ -348,7 +367,10 @@ def _render_doctor_text(report):
         f"  Portal restore grant:    {yn(report['portal_restore_permission_present'])}",
     ]
     if "gnome" in report["desktop"].lower():
-        lines.append(f"  GNOME keybinding:        registered={yn(report['keybinding_registered'])}")
+        lines.append(
+            f"  GNOME keybinding:        registered={yn(report['keybinding_registered'])} "
+            f"key-repeat={yn(report['keyboard_repeat_enabled'])}"
+        )
     if report.get("how_to_improve"):
         lines += ["", f"  How to improve: {report['how_to_improve']}"]
     return "\n".join(lines)
@@ -364,8 +386,9 @@ def doctor(as_json=False):
     is_gnome = "gnome" in desktop.lower()
     autopaste_consent = _autopaste_consent()
     restore_grant = _restore_grant_present()
+    keyboard_repeat = _keyboard_repeat_enabled() if is_gnome else True
 
-    capability = _shortcut_capability(shortcut_backend, shortcut_state, extension_loaded)
+    capability = _shortcut_capability(shortcut_backend, shortcut_state, extension_loaded, keyboard_repeat)
     if shortcut_backend == "gnome-shell-extension" and not extension_loaded:
         shortcut_state = "requires_action"
         shortcut_recovery = "Log out and back in" if extension_installed else "Run: witticism-platform install-gnome-extension"
@@ -382,6 +405,7 @@ def doctor(as_json=False):
         "shortcut_recovery": shortcut_recovery,
         "shortcut_capability": capability,
         "keybinding_registered": _keybinding_registered() if is_gnome else False,
+        "keyboard_repeat_enabled": keyboard_repeat,
         "output_adapter": output_backend,
         "output_capability": _output_capability(output_backend, autopaste_consent, restore_grant),
         "autopaste_consent": autopaste_consent,

@@ -55,6 +55,9 @@ class SystemTrayApp(QSystemTrayIcon):
     # Result of an auto-paste consent flow, emitted from the D-Bus runtime
     # thread and handled on the GUI thread (Qt marshals cross-thread signals).
     autopaste_result = pyqtSignal(bool, str)
+    # Auto-paste was lost mid-session (revoked from the system indicator, or a
+    # paste failed because the session went away); emitted from the D-Bus thread.
+    autopaste_revoked = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -821,6 +824,25 @@ class SystemTrayApp(QSystemTrayIcon):
                 "automatic paste later from the tray menu.",
             )
 
+    def _refresh_autopaste_action(self):
+        """Re-evaluate whether the 'Enable automatic paste...' item should show,
+        reflecting the current (possibly just-revoked) consent state."""
+        if self.autopaste_consent:
+            self.autopaste_action.setVisible(self.autopaste_consent.can_offer())
+
+    def _emit_autopaste_revoked(self):
+        """Bridge the adapter's D-Bus-thread revocation callback to the GUI."""
+        self.autopaste_revoked.emit()
+
+    def _on_autopaste_revoked(self):
+        """GUI-thread handler: auto-paste was lost mid-session."""
+        self._refresh_autopaste_action()
+        self.show_notification(
+            "Automatic paste turned off",
+            "Transcripts are copied to the clipboard. You can re-enable "
+            "automatic paste from the tray menu.",
+        )
+
     def change_audio_device(self, device_index: Optional[int]):
         # Update checkmarks
         for action in self.device_menu.actions():
@@ -986,8 +1008,14 @@ class SystemTrayApp(QSystemTrayIcon):
         self.autopaste_action.setVisible(self.autopaste_consent.can_offer())
         try:
             self.autopaste_result.connect(self._on_autopaste_result)
+            self.autopaste_revoked.connect(self._on_autopaste_revoked)
+            # Re-evaluate the offer's visibility every time the menu opens so it
+            # reflects the current granted-state, not just the state at startup.
+            self.menu.aboutToShow.connect(self._refresh_autopaste_action)
         except Exception:
             pass
+        if output_manager:
+            output_manager.set_autopaste_revoked_callback(self._emit_autopaste_revoked)
 
         # Update PTT action text with actual configured hotkey
         if self.config_manager:

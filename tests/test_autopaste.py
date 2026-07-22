@@ -78,6 +78,18 @@ def test_manual_grant_after_decline():
     assert consent.can_offer() is False
 
 
+def test_can_offer_returns_after_revocation_reset():
+    # Granted, then revoked from the system indicator: the adapter resets
+    # output.autopaste to "unset", and the tray re-evaluates can_offer() (which
+    # reads config live) so the "Enable automatic paste..." item reappears.
+    cfg = FakeConfig({"output.autopaste": "granted", "output.autopaste_prompted": True})
+    consent = AutopasteConsent(cfg, supported=True)
+    assert consent.can_offer() is False           # granted -> nothing to offer
+    cfg.values["output.autopaste"] = "unset"      # revocation reset by the adapter
+    assert consent.can_offer() is True            # offer re-surfaces
+    assert consent.should_auto_prompt() is False  # but no second auto-prompt
+
+
 def test_can_offer_false_when_unsupported():
     cfg = FakeConfig()
     consent = AutopasteConsent(cfg, supported=False)

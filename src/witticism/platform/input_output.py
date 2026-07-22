@@ -66,6 +66,13 @@ REMOTE_DESKTOP_XML = """<node>
     <method name="NotifyKeyboardKeysym"><arg type="o" direction="in"/><arg type="a{sv}" direction="in"/><arg type="i" direction="in"/><arg type="u" direction="in"/></method>
   </interface>
 </node>"""
+PORTAL_SESSION_INTERFACE = "org.freedesktop.portal.Session"
+PORTAL_SESSION_XML = """<node>
+  <interface name="org.freedesktop.portal.Session">
+    <method name="Close"/>
+    <signal name="Closed"><arg type="a{sv}"/></signal>
+  </interface>
+</node>"""
 
 
 class AdapterState(Enum):
@@ -602,8 +609,87 @@ def _build_control_interface(dispatch):
     return _WitticismControl()
 
 
+def _parse_uint(text, default):
+    """Extract the first unsigned integer from a gsettings value (e.g. the
+    ``500`` in ``"uint32 500"``); return ``default`` when there is none."""
+    match = re.search(r"\d+", text or "")
+    return int(match.group()) if match else default
+
+
+class _RepeatStreamTracker:
+    """Infer hold-to-talk from a GNOME custom-keybinding auto-repeat stream.
+
+    gnome-settings-daemon fires the bound command once per key auto-repeat while
+    the key is held. A tap is a single event; a hold is one event, a ~delay gap,
+    then events every ~interval until release. We treat that stream as a release
+    detector: emit ACTIVATED on the first event of a stream, swallow the repeats,
+    and emit DEACTIVATED once the stream goes quiet (key released, or - for a
+    tap - after the tap window elapses).
+
+    Pure logic with an injectable ``schedule(seconds, callback) -> handle`` (the
+    handle only needs ``.cancel()``) so it is unit-testable without an event
+    loop. All calls must happen on a single thread (the async runtime loop);
+    it holds no locks.
+    """
+
+    def __init__(self, triggers, emit, delay_ms, interval_ms, schedule):
+        self._triggers = dict(triggers)          # binding_id -> ShortcutTrigger
+        self._emit = emit                        # emit(binding_id, ShortcutEventType)
+        self._delay = delay_ms / 1000.0
+        self._interval = interval_ms / 1000.0
+        self._schedule = schedule
+        self._timers = {}                        # binding_id -> timer handle
+        self._active = set()                     # binding_ids with a live stream
+
+    def _tap_window(self):
+        # Must bridge the first-repeat gap (== delay) plus slack, so a genuine
+        # hold's first repeat lands before this fires and cancels the tap guess.
+        return self._delay + 4 * self._interval + 0.1
+
+    def _quiet_window(self):
+        # Once repeats flow every ~interval, this bounds "the key went quiet".
+        return 4 * self._interval + 0.1
+
+    def on_event(self, binding_id):
+        if binding_id not in self._triggers:
+            return
+        if binding_id in self._active:
+            # Mid-stream repeat: swallow it, push the quiet deadline out.
+            self._arm(binding_id, self._quiet_window())
+            return
+        # First event of a new stream.
+        self._active.add(binding_id)
+        self._emit(binding_id, ShortcutEventType.ACTIVATED)
+        self._arm(binding_id, self._tap_window())
+
+    def _arm(self, binding_id, seconds):
+        handle = self._timers.pop(binding_id, None)
+        if handle is not None:
+            handle.cancel()
+        self._timers[binding_id] = self._schedule(seconds, lambda: self._expire(binding_id))
+
+    def _expire(self, binding_id):
+        self._timers.pop(binding_id, None)
+        if binding_id not in self._active:
+            return
+        self._active.discard(binding_id)
+        # HOLD bindings have a meaningful release; ACTIVATE (tap) bindings are
+        # satisfied by the press alone and emit no deactivation.
+        if self._triggers.get(binding_id) == ShortcutTrigger.HOLD:
+            self._emit(binding_id, ShortcutEventType.DEACTIVATED)
+
+    def cancel_all(self):
+        for handle in self._timers.values():
+            try:
+                handle.cancel()
+            except Exception:
+                pass
+        self._timers.clear()
+        self._active.clear()
+
+
 class GnomeKeybindingShortcutAdapter(ShortcutAdapter):
-    """GNOME Wayland press-to-toggle backend built on a standard custom shortcut.
+    """GNOME Wayland backend built on a standard custom keyboard shortcut.
 
     This registers an ordinary GNOME custom keyboard shortcut - exactly the kind
     a user creates by hand in Settings > Keyboard > Custom Shortcuts - whose
@@ -612,21 +698,57 @@ class GnomeKeybindingShortcutAdapter(ShortcutAdapter):
     code into the compositor, requires no logout, and is removed when Witticism
     exits.
 
-    A custom shortcut only ever fires on key-press, so this backend advertises
-    ``supports_hold = False`` and the hotkey manager runs press-to-toggle. The
-    optional GNOME Shell extension remains the upgrade path to hold-to-talk.
+    gnome-settings-daemon fires the command once per key auto-repeat while the
+    key is held, so when key repeat is enabled (the normal case) this backend
+    synthesizes true hold-to-talk by inferring the release from the repeat
+    stream (``supports_hold = True``; see :class:`_RepeatStreamTracker`). When
+    key repeat is disabled it falls back to press-to-toggle
+    (``supports_hold = False``). The optional GNOME Shell extension remains the
+    upgrade path to exact, repeat-independent release timing.
     """
 
     supports_hold = False
 
-    def __init__(self, runtime=None):
+    def __init__(self, runtime=None, keyboard_repeat=None):
         self.runtime = runtime or _AsyncDbusRuntime()
         self.bindings = []
         self._binding_ids = set()
         self.on_event = None
         self.bus = None
         self._control = None
+        self._tracker = None
+        # Read the keyboard repeat settings up front (before HotkeyManager reads
+        # supports_hold at construction). Injectable for tests.
+        if keyboard_repeat is None:
+            keyboard_repeat = self._read_keyboard_repeat()
+        self._repeat_enabled, self._repeat_delay_ms, self._repeat_interval_ms = keyboard_repeat
+        self.supports_hold = bool(self._repeat_enabled)
         self.status = AdapterStatus(AdapterState.STARTING, "gnome-media-keys")
+
+    @staticmethod
+    def _read_keyboard_repeat():
+        """Read GNOME keyboard auto-repeat settings (repeat, delay, interval).
+
+        Defaults on any failure: repeat=True, delay=500ms, interval=30ms.
+        """
+        schema = "org.gnome.desktop.peripherals.keyboard"
+
+        def _get(key):
+            try:
+                result = subprocess.run(
+                    ["gsettings", "get", schema, key],
+                    capture_output=True, text=True, check=False,
+                )
+                return result.stdout.strip() if result.returncode == 0 else ""
+            except Exception:
+                return ""
+
+        repeat_raw = _get("repeat").lower()
+        # Default to enabled unless gsettings explicitly reports false.
+        repeat = "false" not in repeat_raw
+        delay = _parse_uint(_get("delay"), 500)
+        interval = _parse_uint(_get("repeat-interval"), 30)
+        return repeat, delay, interval
 
     # -- capability probe ---------------------------------------------------
 
@@ -664,15 +786,24 @@ class GnomeKeybindingShortcutAdapter(ShortcutAdapter):
             )
             logger.error("[PLATFORM_ADAPTER] GNOME keybinding D-Bus export failed: %s", exc)
             return self.status
+        # When key repeat is on, infer hold-to-talk from the repeat stream. The
+        # tracker runs entirely on the runtime loop (same thread as dispatch).
+        if self._repeat_enabled:
+            self._tracker = self._new_tracker()
         # gsettings writes are fast local operations, safe to run synchronously.
         return self._register()
 
     def update_bindings(self, bindings):
         self.bindings = list(bindings)
         self._binding_ids = {b.id for b in self.bindings}
+        if self._tracker is not None:
+            self._tracker.cancel_all()
+            self._tracker = self._new_tracker()
         return self._register()
 
     def stop(self):
+        if self._tracker is not None:
+            self._tracker.cancel_all()
         try:
             self._deregister()
         except Exception as exc:
@@ -712,11 +843,32 @@ class GnomeKeybindingShortcutAdapter(ShortcutAdapter):
             pass
 
     def _dispatch_trigger(self, shortcut_id):
-        if shortcut_id in self._binding_ids:
-            if self.on_event:
-                self.on_event(ShortcutEvent(shortcut_id, ShortcutEventType.ACTIVATED, int(time.time() * 1000)))
-        else:
+        if shortcut_id not in self._binding_ids:
             logger.debug("[PLATFORM_ADAPTER] Ignoring unknown TriggerShortcut id: %s", shortcut_id)
+            return
+        if self._tracker is not None:
+            # Hold-to-talk inference owns emission (ACTIVATED now, DEACTIVATED
+            # when the repeat stream goes quiet).
+            self._tracker.on_event(shortcut_id)
+        else:
+            # Press-to-toggle fallback (key repeat disabled): press-only signal.
+            self._emit_event(shortcut_id, ShortcutEventType.ACTIVATED)
+
+    def _emit_event(self, shortcut_id, event_type):
+        if self.on_event:
+            self.on_event(ShortcutEvent(shortcut_id, event_type, int(time.time() * 1000)))
+
+    def _new_tracker(self):
+        triggers = {b.id: b.trigger for b in self.bindings}
+        return _RepeatStreamTracker(
+            triggers, self._emit_event,
+            self._repeat_delay_ms, self._repeat_interval_ms, self._schedule_on_loop,
+        )
+
+    def _schedule_on_loop(self, seconds, callback):
+        # Called on the runtime loop thread (from _dispatch_trigger), so using
+        # the loop's non-thread-safe call_later directly is correct here.
+        return self.runtime.loop.call_later(seconds, callback)
 
     # -- gsettings registration --------------------------------------------
 
@@ -822,7 +974,8 @@ class GnomeKeybindingShortcutAdapter(ShortcutAdapter):
         for path in stale:
             self._reset_entry(path)
         self.status = self._ready_status()
-        logger.info("[PLATFORM_ADAPTER] GNOME custom keyboard shortcut registered (press-to-toggle)")
+        mode = "hold-to-talk via key repeat" if self._repeat_enabled else "press-to-toggle"
+        logger.info("[PLATFORM_ADAPTER] GNOME custom keyboard shortcut registered (%s)", mode)
         return self.status
 
     def _rollback(self, written, original_list):
@@ -854,11 +1007,17 @@ class GnomeKeybindingShortcutAdapter(ShortcutAdapter):
     def _ready_status(self):
         ptt = next((b for b in self.bindings if b.id == "push_to_talk"), None)
         source = ptt or (self.bindings[0] if self.bindings else None)
-        key = source.accelerator.upper() if source else "The hotkey"
-        message = (
-            f"{key} is registered as a standard GNOME custom keyboard shortcut (press-to-toggle); "
-            "view or change it in Settings > Keyboard"
-        )
+        key = source.accelerator.upper() if source else "the hotkey"
+        if self._repeat_enabled:
+            message = (
+                f"Hold {key} to talk (release detected via GNOME key repeat), registered as a "
+                "standard GNOME custom keyboard shortcut"
+            )
+        else:
+            message = (
+                f"{key} is registered as a standard GNOME custom keyboard shortcut (press-to-toggle); "
+                "view or change it in Settings > Keyboard"
+            )
         return AdapterStatus(AdapterState.READY, "gnome-media-keys", message, GNOME_EXTENSION_RECOVERY)
 
 
@@ -935,6 +1094,10 @@ class RemoteDesktopPasteAdapter(TextOutputAdapter):
         self.interface = None
         self.session = None
         self.ready = False
+        # Optional UI callback fired when auto-paste is lost (revoked from the
+        # system indicator, or a paste failed because the session went away) so
+        # the tray can re-surface its "Enable automatic paste..." entry.
+        self.on_revoked = None
         self.status = AdapterStatus(AdapterState.STARTING, "xdg-remote-desktop")
         state_dir = Path(platformdirs.user_state_dir("witticism"))
         self.token_file = state_dir / "wayland-portal.json"
@@ -1054,6 +1217,63 @@ class RemoteDesktopPasteAdapter(TextOutputAdapter):
             raise PermissionError("Keyboard permission was not granted")
         self._store_token(started.get("restore_token"))
         self.ready = True
+        await self._subscribe_session_closed()
+
+    async def _subscribe_session_closed(self):
+        """Watch the portal session's Closed signal so a mid-session revocation
+        (e.g. the user turning auto-paste off from GNOME's system indicator) is
+        noticed instead of dying silently."""
+        try:
+            from dbus_next.introspection import Node
+
+            obj = self.bus.get_proxy_object(PORTAL_BUS, self.session, Node.parse(PORTAL_SESSION_XML))
+            session_iface = obj.get_interface(PORTAL_SESSION_INTERFACE)
+            session_iface.on_closed(self._on_session_closed)
+        except Exception as exc:
+            logger.debug("[PLATFORM_ADAPTER] Could not watch session Closed signal: %s", exc)
+
+    def _on_session_closed(self, *_args):
+        logger.info("[PLATFORM_ADAPTER] Remote Desktop session was closed by the system; auto-paste revoked")
+        self._handle_revocation()
+
+    def _handle_revocation(self):
+        """The grant is gone. Drop to clipboard, clear the (now-dead) session,
+        and reset consent + token so re-enabling runs the full priming + portal
+        flow again and the tray offer reappears."""
+        self.ready = False
+        self.session = None
+        self._reset_consent()
+        self.status = AdapterStatus(
+            AdapterState.DEGRADED, "clipboard",
+            "Automatic paste was turned off from the system indicator - transcripts stay on the clipboard",
+            AUTOPASTE_REENABLE_RECOVERY,
+        )
+        self._notify_revoked()
+
+    def _reset_consent(self):
+        self._delete_token()
+        if self.config is not None:
+            try:
+                self.config.set("output.autopaste", AUTOPASTE_UNSET)
+            except Exception:
+                logger.debug("[PLATFORM_ADAPTER] Could not reset autopaste consent", exc_info=True)
+
+    def _delete_token(self):
+        try:
+            self.token_file.unlink()
+        except FileNotFoundError:
+            pass
+        except Exception:
+            logger.debug("[PLATFORM_ADAPTER] Could not delete restore token", exc_info=True)
+
+    def _notify_revoked(self):
+        callback = self.on_revoked
+        if callback is None:
+            return
+        try:
+            callback()
+        except Exception:
+            logger.debug("[PLATFORM_ADAPTER] on_revoked callback failed", exc_info=True)
 
     async def _restore_session(self):
         """Startup path for an already-granted session: silent token restore."""
@@ -1137,11 +1357,18 @@ class RemoteDesktopPasteAdapter(TextOutputAdapter):
             self._downgrade(exc)
 
     def _downgrade(self, exc):
+        # A paste failed (often because the session went away just before its
+        # Closed signal arrived). The transcript is already on the clipboard -
+        # copied before paste - so this only affects future pastes. Closed, if
+        # it follows, does the authoritative consent reset.
         self.ready = False
         self.status = AdapterStatus(
-            AdapterState.DEGRADED, "clipboard", str(exc), "Restart or reauthorize Wayland integration"
+            AdapterState.DEGRADED, "clipboard",
+            "Automatic paste stopped working - transcripts stay on the clipboard",
+            AUTOPASTE_REENABLE_RECOVERY,
         )
         logger.warning("[PLATFORM_ADAPTER] Auto-paste failed; clipboard fallback active: %s", exc)
+        self._notify_revoked()
 
     def copy_to_clipboard(self, text): return _clipboard(text)
 
