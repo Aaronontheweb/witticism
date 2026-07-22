@@ -4,13 +4,17 @@ This document is the maintained runtime contract for desktop integration. ADR-00
 
 ## Support matrix
 
-| Platform | Shortcut capture | Text delivery | Release status |
-|---|---|---|---|
-| Windows | pynput Win32 | pynput typing | Supported |
-| Linux X11 | pynput Xorg | pynput typing | Supported |
-| Wayland with Global Shortcuts portal | XDG Global Shortcuts | Clipboard plus Remote Desktop portal paste | Supported |
-| GNOME Shell 46 Wayland | Witticism Shell extension | Clipboard plus Remote Desktop portal paste | Supported |
-| macOS | None | None | Unsupported |
+| Platform / session | Shortcut backend | Capability tier | Text delivery | Release status |
+|---|---|---|---|---|
+| Windows | pynput Win32 | hold-to-talk | pynput typing | Supported |
+| Linux X11 | pynput Xorg | hold-to-talk | pynput typing | Supported |
+| Wayland with GlobalShortcuts portal (KDE, GNOME 48+) | XDG GlobalShortcuts | hold-to-talk | Clipboard plus Remote Desktop portal paste | Supported |
+| GNOME 46/47 Wayland, extension installed and running | Witticism GNOME Shell extension | hold-to-talk | Clipboard plus Remote Desktop portal paste | Supported |
+| GNOME 46/47 Wayland, no extension | `org.gnome.Shell.GrabAccelerator` fallback | press-to-toggle | Clipboard plus Remote Desktop portal paste | Supported (degraded) |
+| Other Wayland without the portal | none | unavailable (tray/manual only) | Clipboard only | Degraded |
+| macOS | none | unavailable | Clipboard only | Unsupported |
+
+The three capability tiers are **hold-to-talk** (hold the hotkey to record, release to stop), **press-to-toggle (fallback)** (press once to start, press again to stop), and **unavailable** (no global shortcut; tray and manual controls only). The `GrabAccelerator` fallback is press-to-toggle by necessity: that API delivers only an activation event and never a key release, so a held-key model is impossible. It is the no-setup default on GNOME 46/47 Wayland; the optional extension upgrades those sessions to hold-to-talk.
 
 Wayland intentionally prevents ordinary applications from monitoring or synthesizing arbitrary keyboard input. Witticism must never run its Xorg adapter under Wayland and claim success.
 
@@ -26,22 +30,40 @@ Adapter states are `unavailable`, `requires_action`, `starting`, `ready`, `degra
 
 ## Selection
 
-1. Windows selects pynput Win32.
-2. Linux outside Wayland selects pynput Xorg.
-3. Wayland prefers `org.freedesktop.portal.GlobalShortcuts`.
-4. GNOME Wayland without that portal selects `witticism@stannardlabs.com`.
-5. Other Wayland sessions without the portal fail visibly.
+Shortcut backend, in order:
+
+1. Windows selects pynput (hold-to-talk).
+2. Linux outside Wayland (X11) selects pynput (hold-to-talk).
+3. Wayland with `org.freedesktop.portal.GlobalShortcuts` (KDE, GNOME 48+) selects the portal (hold-to-talk).
+4. GNOME Wayland without that portal (e.g. GNOME 46/47):
+   - if the optional Witticism GNOME Shell extension (`witticism@stannardlabs.com`) is installed and running, select it (hold-to-talk);
+   - otherwise select the `org.gnome.Shell.GrabAccelerator` fallback (press-to-toggle).
+5. Other Wayland sessions without the portal expose no shortcut backend; the tray and manual controls remain available.
 6. Shortcut and output selection are independent.
+
+Text output:
+
+1. Windows and X11 select pynput typing.
+2. Wayland selects clipboard plus Ctrl+V paste through a keyboard-only Remote Desktop portal session with a persisted restore token; denial, revocation, or a locked session degrades to clipboard-only.
+3. The `output.mode: "clipboard"` configuration forces clipboard-only on all platforms.
 
 Display and portal detection must occur before importing pynput. Dynamic binding changes are forwarded to the active adapter. Portal shortcut changes establish a replacement session because the portal permits binding once per session.
 
-## GNOME bridge
+## GNOME bridge and the GrabAccelerator fallback
 
-The extension owns `com.stannardlabs.Witticism.Shell` and accepts configuration only from the owner of `com.stannardlabs.Witticism`. It emits configured shortcut identifiers and timestamps, never raw keys. It observes without consuming events, ignores input while locked, suppresses repeats, and disconnects all Shell signals when disabled.
+On GNOME Wayland without the GlobalShortcuts portal, two backends are possible.
 
-The initial extension artifact supports GNOME Shell 46. Each additional Shell major version must be added only after release qualification because extensions run inside GNOME Shell.
+The **`org.gnome.Shell.GrabAccelerator` fallback** is the no-setup default. It grabs the configured accelerator through GNOME Shell's built-in D-Bus method and needs no installation, but the API reports only accelerator activations, so the hotkey works as press-to-toggle rather than hold-to-talk.
 
-GNOME Wayland does not rescan a newly installed local extension in the running Shell. The installer writes the UUID to GNOME's enabled-extension setting, and the user must log out and back in once after the first installation. Updates to an already registered extension can be enabled normally.
+The **optional GNOME Shell extension** upgrades those sessions to hold-to-talk. It owns `com.stannardlabs.Witticism.Shell` and accepts configuration only from the owner of `com.stannardlabs.Witticism`. It emits configured shortcut identifiers and timestamps, never raw keys. It observes without consuming events, ignores input while locked, suppresses repeats, and disconnects all Shell signals when disabled.
+
+The initial extension artifact supports GNOME Shell 46 and 47. Each additional Shell major version must be added only after release qualification because extensions run inside GNOME Shell.
+
+### Delivery (opt-in)
+
+Deploying the extension is governed by [ADR-003](adr/003-opt-in-gnome-extension-delivery.md) and is strictly opt-in. `install.sh` never installs or enables it; on a GNOME Wayland session it prints guidance only. The extension is deployed exclusively through `witticism-platform install-gnome-extension`, which first discloses what the extension is and does, then requires explicit confirmation (interactive `y/N`, bypassable with `--yes`; a non-interactive run without `--yes` refuses and exits non-zero).
+
+GNOME Wayland does not rescan a newly installed local extension in the running Shell. The install command enables it live where possible and otherwise pre-enables it by writing the UUID to GNOME's `enabled-extensions` setting; either way the user must log out and back in once after the first installation before it loads. Updates to an already registered extension can be enabled normally. `witticism-platform uninstall-gnome-extension` disables and removes it symmetrically. Distribution through extensions.gnome.org is the preferred long-term channel so that GNOME's own tooling manages the lifecycle.
 
 ## Portal permissions and state
 
@@ -57,4 +79,6 @@ Implement the relevant contract, keep imports lazy, add selection without changi
 
 ## Diagnostics
 
-`witticism-platform doctor` reports protocol, desktop, portal capabilities, selected adapters, extension state, and whether a restore grant exists. It must not report usernames, hostnames, hardware, devices, paths, tokens, transcripts, environment dumps, or raw logs.
+`witticism-platform doctor` reports session type, desktop, portal capabilities (GlobalShortcuts and RemoteDesktop), the selected shortcut backend and its capability tier (hold-to-talk, press-to-toggle (fallback), or unavailable), the selected output backend (portal paste, typing, or clipboard-only), the extension installed/running state, and whether a portal restore grant exists. When a session is degraded it also prints a "how to improve" line, such as the opt-in extension install hint with its logout caveat on GNOME.
+
+Output defaults to human-readable text; `--json` emits the machine-readable report. `doctor` degrades gracefully when D-Bus is unreachable, reporting whatever it can rather than crashing. It must not report usernames, hostnames, hardware, devices, paths, tokens, transcripts, environment dumps, or raw logs.
