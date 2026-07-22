@@ -162,3 +162,41 @@ def test_doctor_text_survives_dbus_unreachable(monkeypatch, capsys):
     assert rc == 0
     out = capsys.readouterr().out
     assert "Witticism platform diagnostics" in out
+
+
+# ---------------------------------------------------------------------------
+# Uninstall must remove the pre-enabled gsettings entry that
+# `gnome-extensions disable` cannot touch for a never-loaded extension.
+# ---------------------------------------------------------------------------
+
+def test_uninstall_removes_uuid_from_enabled_extensions(monkeypatch):
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        if cmd[:2] == ["gsettings", "get"]:
+            return FakeProc(stdout="['other@example.com', 'witticism@stannardlabs.com']")
+        return FakeProc()
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    assert cli._remove_from_enabled_extensions() is True
+    set_call = calls[-1]
+    assert set_call[:2] == ["gsettings", "set"]
+    assert "witticism@stannardlabs.com" not in set_call[-1]
+    assert "other@example.com" in set_call[-1]
+
+
+def test_uninstall_enabled_extensions_noop_when_absent(monkeypatch):
+    monkeypatch.setattr(
+        cli.subprocess, "run",
+        lambda cmd, **kwargs: FakeProc(stdout="['other@example.com']"),
+    )
+    assert cli._remove_from_enabled_extensions() is False
+
+
+def test_uninstall_enabled_extensions_tolerates_gsettings_failure(monkeypatch):
+    monkeypatch.setattr(
+        cli.subprocess, "run",
+        lambda cmd, **kwargs: FakeProc(returncode=1),
+    )
+    assert cli._remove_from_enabled_extensions() is False

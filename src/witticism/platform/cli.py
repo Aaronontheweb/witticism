@@ -127,6 +127,36 @@ def install_extension(assume_yes=False):
     return 0
 
 
+def _remove_from_enabled_extensions():
+    """Mirror of install's pre-enable fallback: drop the UUID from
+    org.gnome.shell enabled-extensions. `gnome-extensions disable` only works
+    for extensions the running Shell has loaded, so an extension that was
+    pre-enabled but never loaded (Wayland before relogin) leaves a stale
+    entry behind unless it is removed here."""
+    current = subprocess.run(
+        ["gsettings", "get", "org.gnome.shell", "enabled-extensions"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if current.returncode:
+        return False
+    try:
+        enabled = ast.literal_eval(current.stdout.strip())
+    except (SyntaxError, ValueError):
+        return False
+    if EXTENSION_UUID not in enabled:
+        return False
+    enabled = [uuid for uuid in enabled if uuid != EXTENSION_UUID]
+    removed = subprocess.run(
+        ["gsettings", "set", "org.gnome.shell", "enabled-extensions", repr(enabled)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return removed.returncode == 0
+
+
 def uninstall_extension():
     print(f"Removing the Witticism GNOME Shell extension ({EXTENSION_UUID}).")
     disabled = subprocess.run(
@@ -134,6 +164,8 @@ def uninstall_extension():
     )
     if disabled.returncode == 0:
         print("Disabled it in the running GNOME Shell.")
+    if _remove_from_enabled_extensions():
+        print("Removed it from GNOME's enabled-extensions list.")
     target = _extension_target()
     if target.exists():
         shutil.rmtree(target, ignore_errors=True)
