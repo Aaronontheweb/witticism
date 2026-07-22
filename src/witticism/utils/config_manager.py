@@ -43,7 +43,12 @@ class ConfigManager:
             },
             "output": {
                 "mode": "type",
-                "typing_delay": 0.1
+                "typing_delay": 0.1,
+                # Wayland auto-paste consent: "unset" (clipboard default, may be
+                # offered once), "granted", or "declined". autopaste_prompted
+                # guards the one-time in-app priming so it is never shown twice.
+                "autopaste": "unset",
+                "autopaste_prompted": False
             },
             "pipeline": {
                 "min_audio_length": 0.5,

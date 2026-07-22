@@ -231,6 +231,23 @@ def _restore_grant_present():
         return False
 
 
+def _autopaste_consent():
+    """Read the saved auto-paste consent state ("unset"/"granted"/"declined").
+
+    Reads only our own config value; the opaque portal restore token lives in a
+    separate 0600 state file and is never read or reported here.
+    """
+    try:
+        path = Path(platformdirs.user_config_dir("witticism")) / "config.json"
+        if not path.exists():
+            return "unset"
+        data = json.loads(path.read_text())
+        value = data.get("output", {}).get("autopaste", "unset")
+        return value if value in ("unset", "granted", "declined") else "unset"
+    except Exception:
+        return "unset"
+
+
 def _keybinding_registered():
     """Whether Witticism's own GNOME custom keybinding entries are present.
 
@@ -268,13 +285,19 @@ def _shortcut_capability(backend, state, extension_loaded):
     return "press-to-toggle (fallback)"
 
 
-def _output_capability(backend):
+def _output_capability(backend, autopaste_consent="unset", token_present=False):
+    """User-facing output tier.
+
+    "portal paste" is reported only when auto-paste has been granted AND a
+    restore token exists (so it would actually work). Clipboard-first is the
+    designed Wayland default, not a degradation.
+    """
     b = (backend or "").lower()
-    if "remote-desktop" in b:
-        return "portal paste"
-    if "pynput" in b:
+    if "pynput" in b or "typing" in b:
         return "typing"
-    return "clipboard-only"
+    if "remote-desktop" in b and autopaste_consent == "granted" and token_present:
+        return "portal paste"
+    return "clipboard"
 
 
 def _how_to_improve(report):
@@ -294,8 +317,15 @@ def _how_to_improve(report):
         return report.get("shortcut_recovery") or (
             "This session cannot capture global shortcuts. Use an X11 session or the tray controls."
         )
-    if report["output_capability"] == "clipboard-only":
-        return "Automatic paste is unavailable; recognized text is copied to the clipboard for manual paste."
+    if (
+        report["output_capability"] == "clipboard"
+        and report["display_protocol"].lower() == "wayland"
+        and report.get("autopaste_consent") in ("unset", "declined")
+    ):
+        return (
+            "Transcripts are copied to the clipboard. You can optionally enable automatic paste "
+            "(a one-time GNOME permission) from the Witticism tray menu."
+        )
     return None
 
 
@@ -312,6 +342,7 @@ def _render_doctor_text(report):
         f"  RemoteDesktop portal:    {yn(report['remote_desktop_portal'])}",
         f"  Shortcut backend:        {report['shortcut_adapter']} ({report['shortcut_capability']})",
         f"  Output backend:          {report['output_adapter']} ({report['output_capability']})",
+        f"  Automatic paste:         {report['autopaste_consent']}",
         f"  GNOME extension:         installed={yn(report['gnome_extension_installed'])} "
         f"running={yn(report['gnome_extension_loaded'])}",
         f"  Portal restore grant:    {yn(report['portal_restore_permission_present'])}",
@@ -331,6 +362,8 @@ def doctor(as_json=False):
 
     desktop = os.environ.get("XDG_CURRENT_DESKTOP", "unknown")
     is_gnome = "gnome" in desktop.lower()
+    autopaste_consent = _autopaste_consent()
+    restore_grant = _restore_grant_present()
 
     capability = _shortcut_capability(shortcut_backend, shortcut_state, extension_loaded)
     if shortcut_backend == "gnome-shell-extension" and not extension_loaded:
@@ -350,11 +383,12 @@ def doctor(as_json=False):
         "shortcut_capability": capability,
         "keybinding_registered": _keybinding_registered() if is_gnome else False,
         "output_adapter": output_backend,
-        "output_capability": _output_capability(output_backend),
+        "output_capability": _output_capability(output_backend, autopaste_consent, restore_grant),
+        "autopaste_consent": autopaste_consent,
         "gnome_extension_installed": extension_installed,
         "gnome_extension_loaded": extension_loaded,
         "gnome_extension_restart_required": extension_installed and not extension_loaded,
-        "portal_restore_permission_present": _restore_grant_present(),
+        "portal_restore_permission_present": restore_grant,
     }
     report["how_to_improve"] = _how_to_improve(report)
 

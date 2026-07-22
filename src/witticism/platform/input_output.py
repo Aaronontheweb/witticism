@@ -42,6 +42,14 @@ DBUS_PATH = "/org/freedesktop/DBus"
 GNOME_EXTENSION_RECOVERY = (
     "Run: witticism-platform install-gnome-extension, then log out and back in"
 )
+# Auto-paste consent (config key output.autopaste). Clipboard-first is the
+# designed Wayland default; the Remote Desktop portal - and GNOME's permission
+# dialog - is only touched after the user explicitly consents.
+AUTOPASTE_UNSET = "unset"
+AUTOPASTE_GRANTED = "granted"
+AUTOPASTE_DECLINED = "declined"
+CLIPBOARD_WAYLAND_MESSAGE = "Transcripts are copied to the clipboard - paste with Ctrl+V"
+AUTOPASTE_REENABLE_RECOVERY = "Re-enable automatic paste from the tray menu"
 GLOBAL_SHORTCUTS_XML = """<node>
   <interface name="org.freedesktop.portal.GlobalShortcuts">
     <method name="CreateSession"><arg type="a{sv}" direction="in"/><arg type="o" direction="out"/></method>
@@ -899,8 +907,8 @@ class PynputTextOutputAdapter(TextOutputAdapter):
 
 
 class ClipboardTextOutputAdapter(TextOutputAdapter):
-    def __init__(self, message="Direct text output is unsupported on this platform"):
-        self.status = AdapterStatus(AdapterState.DEGRADED, "clipboard", message)
+    def __init__(self, message="Direct text output is unsupported on this platform", state=AdapterState.DEGRADED):
+        self.status = AdapterStatus(state, "clipboard", message)
 
     def start(self): return self.status
     def output_text(self, text): return _clipboard(text)
@@ -909,7 +917,19 @@ class ClipboardTextOutputAdapter(TextOutputAdapter):
 
 
 class RemoteDesktopPasteAdapter(TextOutputAdapter):
-    def __init__(self):
+    """Wayland auto-paste via the Remote Desktop portal - strictly consent-gated.
+
+    Auto-paste is OFF by default. The adapter never touches the Remote Desktop
+    portal (no probe, no session, no dialog) until the user has explicitly
+    consented through ``request_autopaste()``. Until then it behaves exactly as
+    the designed clipboard-only output. A previously granted session is restored
+    silently at startup using the persisted token; if that token is gone or
+    revoked the adapter falls back to clipboard and asks the user to re-enable,
+    rather than silently popping GNOME's permission dialog at startup.
+    """
+
+    def __init__(self, config_manager=None):
+        self.config = config_manager
         self.runtime = _AsyncDbusRuntime()
         self.bus = None
         self.interface = None
@@ -919,12 +939,49 @@ class RemoteDesktopPasteAdapter(TextOutputAdapter):
         state_dir = Path(platformdirs.user_state_dir("witticism"))
         self.token_file = state_dir / "wayland-portal.json"
 
+    def _consent_state(self):
+        if self.config is None:
+            return AUTOPASTE_UNSET
+        try:
+            return self.config.get("output.autopaste", AUTOPASTE_UNSET)
+        except Exception:
+            return AUTOPASTE_UNSET
+
     def start(self):
-        if not portal_has_interface(REMOTE_DESKTOP):
-            self.status = AdapterStatus(AdapterState.DEGRADED, "clipboard", "Remote Desktop portal unavailable", "Transcripts will remain on the clipboard")
+        # Designed default: clipboard-only unless the user has enabled auto-paste.
+        # No portal probe or session is issued in this path, so no dialog appears.
+        if self._consent_state() != AUTOPASTE_GRANTED:
+            self.ready = False
+            self.status = AdapterStatus(AdapterState.READY, "clipboard", CLIPBOARD_WAYLAND_MESSAGE)
             return self.status
-        self.runtime.submit(self._initialize())
+        if not self._load_token():
+            # Granted before, but the restore token is gone: never silently
+            # re-prompt at startup - fall back and let the user re-enable.
+            self.ready = False
+            self.status = AdapterStatus(
+                AdapterState.DEGRADED, "clipboard",
+                "Automatic paste needs to be re-enabled", AUTOPASTE_REENABLE_RECOVERY,
+            )
+            return self.status
+        # Granted with a saved token: restore the session silently (no dialog).
+        self.status = AdapterStatus(AdapterState.STARTING, "xdg-remote-desktop")
+        self.runtime.submit(self._restore_session())
         return self.status
+
+    def request_autopaste(self, on_result=None):
+        """Start a Remote Desktop portal session.
+
+        This is the ONLY place GNOME's permission dialog may appear. It is
+        invoked from the in-app priming flow after the user opts in.
+        ``on_result(granted: bool, message)`` fires when the portal flow
+        resolves (on the D-Bus runtime thread).
+        """
+        try:
+            self.runtime.submit(self._consent_session(on_result))
+        except Exception as exc:
+            logger.warning("[PLATFORM_ADAPTER] Auto-paste consent flow failed to start: %s", exc)
+            if on_result:
+                on_result(False, str(exc))
 
     def _load_token(self):
         try:
@@ -952,50 +1009,83 @@ class RemoteDesktopPasteAdapter(TextOutputAdapter):
             os.close(fd)
         temporary.replace(self.token_file)
 
-    async def _initialize(self):
-        try:
-            from dbus_next import Variant
-            from dbus_next.aio import MessageBus
+    async def _open_session(self):
+        """Open a keyboard-only Remote Desktop portal session.
 
-            self.bus = await MessageBus().connect()
-            from dbus_next.introspection import Node
-            obj = self.bus.get_proxy_object(PORTAL_BUS, PORTAL_PATH, Node.parse(REMOTE_DESKTOP_XML))
-            self.interface = obj.get_interface(REMOTE_DESKTOP)
-            create_token = _token("create")
-            result = await _portal_request(
-                self.bus,
-                self.interface.call_create_session,
-                [{"handle_token": Variant("s", create_token), "session_handle_token": Variant("s", _token("session"))}],
-                create_token,
-            )
-            self.session = result["session_handle"]
-            select_token = _token("devices")
-            options = {
-                "handle_token": Variant("s", select_token),
-                "types": Variant("u", 1),
-                "persist_mode": Variant("u", 2),
-            }
-            restore_token = self._load_token()
-            if restore_token:
-                options["restore_token"] = Variant("s", restore_token)
-            await _portal_request(self.bus, self.interface.call_select_devices, [self.session, options], select_token)
-            start_token = _token("start")
-            started = await _portal_request(
-                self.bus,
-                self.interface.call_start,
-                [self.session, "", {"handle_token": Variant("s", start_token)}],
-                start_token,
-            )
-            if not started.get("devices", 0) & 1:
-                raise PermissionError("Keyboard permission was not granted")
-            self._store_token(started.get("restore_token"))
-            self.ready = True
+        With a stored restore token the portal restores silently; without one it
+        prompts. Callers gate which path is reachable so a fresh prompt only ever
+        happens from the consent flow, never at startup. Raises on failure.
+        """
+        from dbus_next import Variant
+        from dbus_next.aio import MessageBus
+
+        if not portal_has_interface(REMOTE_DESKTOP):
+            raise RuntimeError("Remote Desktop portal is unavailable")
+        self.bus = await MessageBus().connect()
+        from dbus_next.introspection import Node
+        obj = self.bus.get_proxy_object(PORTAL_BUS, PORTAL_PATH, Node.parse(REMOTE_DESKTOP_XML))
+        self.interface = obj.get_interface(REMOTE_DESKTOP)
+        create_token = _token("create")
+        result = await _portal_request(
+            self.bus,
+            self.interface.call_create_session,
+            [{"handle_token": Variant("s", create_token), "session_handle_token": Variant("s", _token("session"))}],
+            create_token,
+        )
+        self.session = result["session_handle"]
+        select_token = _token("devices")
+        options = {
+            "handle_token": Variant("s", select_token),
+            "types": Variant("u", 1),
+            "persist_mode": Variant("u", 2),
+        }
+        restore_token = self._load_token()
+        if restore_token:
+            options["restore_token"] = Variant("s", restore_token)
+        await _portal_request(self.bus, self.interface.call_select_devices, [self.session, options], select_token)
+        start_token = _token("start")
+        started = await _portal_request(
+            self.bus,
+            self.interface.call_start,
+            [self.session, "", {"handle_token": Variant("s", start_token)}],
+            start_token,
+        )
+        if not started.get("devices", 0) & 1:
+            raise PermissionError("Keyboard permission was not granted")
+        self._store_token(started.get("restore_token"))
+        self.ready = True
+
+    async def _restore_session(self):
+        """Startup path for an already-granted session: silent token restore."""
+        try:
+            await self._open_session()
             self.status = AdapterStatus(AdapterState.READY, "xdg-remote-desktop")
-            logger.info("[PLATFORM_ADAPTER] Remote Desktop paste ready")
+            logger.info("[PLATFORM_ADAPTER] Remote Desktop paste restored")
         except Exception as exc:
             self.ready = False
-            self.status = AdapterStatus(AdapterState.DEGRADED, "clipboard", str(exc), "Grant keyboard control to enable automatic paste")
-            logger.warning("[PLATFORM_ADAPTER] Auto-paste unavailable; clipboard fallback active: %s", exc)
+            self.status = AdapterStatus(
+                AdapterState.DEGRADED, "clipboard",
+                "Automatic paste needs to be re-enabled", AUTOPASTE_REENABLE_RECOVERY,
+            )
+            logger.warning("[PLATFORM_ADAPTER] Auto-paste session could not be restored: %s", exc)
+
+    async def _consent_session(self, on_result):
+        """Consent path: the only place a fresh portal prompt may appear."""
+        granted = False
+        message = None
+        try:
+            await self._open_session()
+            granted = True
+            self.status = AdapterStatus(AdapterState.READY, "xdg-remote-desktop")
+            logger.info("[PLATFORM_ADAPTER] Remote Desktop paste enabled")
+        except Exception as exc:
+            self.ready = False
+            message = str(exc)
+            self.status = AdapterStatus(AdapterState.READY, "clipboard", CLIPBOARD_WAYLAND_MESSAGE)
+            logger.info("[PLATFORM_ADAPTER] Auto-paste was not enabled: %s", exc)
+        finally:
+            if on_result:
+                on_result(granted, message)
 
     async def _paste(self):
         await self.interface.call_notify_keyboard_keysym(self.session, {}, 0xFFE3, 1)
@@ -1029,7 +1119,9 @@ class RemoteDesktopPasteAdapter(TextOutputAdapter):
         if not copied.success:
             return copied
         if not self.ready:
-            return OutputResult(True, False, "Copied to clipboard; automatic paste is unavailable")
+            # Clipboard-only is the designed default until the user enables
+            # auto-paste; report a clean success with no per-transcript warning.
+            return OutputResult(True, False)
         try:
             future = self.runtime.submit(self._paste())
         except Exception as exc:
@@ -1227,11 +1319,11 @@ def create_text_output_adapter(config_manager=None):
         except Exception:
             mode = None
     if mode == "clipboard":
-        return ClipboardTextOutputAdapter("Output mode is set to clipboard")
+        return ClipboardTextOutputAdapter("Output mode is set to clipboard", state=AdapterState.READY)
     system = platform.system().lower()
     session = os.environ.get("XDG_SESSION_TYPE", "").lower()
     if system == "windows" or (system == "linux" and session != "wayland"):
         return PynputTextOutputAdapter()
     if system == "linux" and session == "wayland":
-        return RemoteDesktopPasteAdapter()
+        return RemoteDesktopPasteAdapter(config_manager)
     return ClipboardTextOutputAdapter()

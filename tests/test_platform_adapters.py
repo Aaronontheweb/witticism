@@ -322,6 +322,120 @@ def test_remote_desktop_output_text_is_non_blocking(monkeypatch):
     assert adapter.status.backend == "clipboard"
 
 
+# ---------------------------------------------------------------------------
+# Auto-paste is consent-gated: the adapter must never touch the Remote Desktop
+# portal (no probe, no session, no dialog) until the user has granted it.
+# ---------------------------------------------------------------------------
+
+class _AutopasteConfig:
+    def __init__(self, autopaste="unset"):
+        self.values = {"output.autopaste": autopaste}
+
+    def get(self, key, default=None):
+        return self.values.get(key, default)
+
+
+class _RecordingRuntime:
+    def __init__(self):
+        self.loop = None
+        self.submitted = []
+
+    def submit(self, coroutine):
+        self.submitted.append(coroutine.__name__)
+        coroutine.close()  # never actually run the portal coroutine
+        return concurrent.futures.Future()
+
+    def stop(self):
+        self.loop = None
+
+
+def _paste_adapter(monkeypatch, autopaste, tmp_path, token=None):
+    def _no_portal(_name):
+        raise AssertionError("the Remote Desktop portal must not be touched at startup")
+
+    monkeypatch.setattr(input_output, "portal_has_interface", _no_portal)
+    adapter = RemoteDesktopPasteAdapter(_AutopasteConfig(autopaste))
+    adapter.runtime = _RecordingRuntime()
+    adapter.token_file = tmp_path / "wayland-portal.json"
+    if token is not None:
+        adapter.token_file.write_text('{"restore_token": "%s"}' % token)
+    return adapter
+
+
+def test_autopaste_unset_makes_no_portal_calls_at_startup(monkeypatch, tmp_path):
+    adapter = _paste_adapter(monkeypatch, "unset", tmp_path)
+    status = adapter.start()
+    assert adapter.runtime.submitted == []       # no session coroutine submitted
+    assert status.state == AdapterState.READY     # clipboard is the designed default
+    assert status.backend == "clipboard"
+    assert adapter.ready is False
+
+
+def test_autopaste_declined_makes_no_portal_calls_at_startup(monkeypatch, tmp_path):
+    adapter = _paste_adapter(monkeypatch, "declined", tmp_path)
+    status = adapter.start()
+    assert adapter.runtime.submitted == []
+    assert status.state == AdapterState.READY
+    assert status.backend == "clipboard"
+
+
+def test_autopaste_granted_with_token_restores_session_silently(monkeypatch, tmp_path):
+    adapter = _paste_adapter(monkeypatch, "granted", tmp_path, token="tok")
+    status = adapter.start()
+    assert adapter.runtime.submitted == ["_restore_session"]  # silent restore, no prompt
+    assert status.state == AdapterState.STARTING
+    assert status.backend == "xdg-remote-desktop"
+
+
+def test_autopaste_granted_without_token_does_not_reprompt(monkeypatch, tmp_path):
+    adapter = _paste_adapter(monkeypatch, "granted", tmp_path)  # no token file present
+    status = adapter.start()
+    assert adapter.runtime.submitted == []       # never opens a session -> no dialog
+    assert status.state == AdapterState.DEGRADED
+    assert status.backend == "clipboard"
+    assert "re-enable" in (status.message or "").lower()
+
+
+def test_request_autopaste_success_reports_granted():
+    adapter = RemoteDesktopPasteAdapter()
+    results = []
+
+    async def fake_open():
+        adapter.ready = True
+
+    adapter._open_session = fake_open
+    asyncio.run(adapter._consent_session(lambda granted, message: results.append((granted, message))))
+    assert results == [(True, None)]
+    assert adapter.ready is True
+    assert adapter.status.backend == "xdg-remote-desktop"
+    assert adapter.status.state == AdapterState.READY
+
+
+def test_request_autopaste_denial_reports_not_granted():
+    adapter = RemoteDesktopPasteAdapter()
+    results = []
+
+    async def fake_open():
+        raise PermissionError("Keyboard permission was not granted")
+
+    adapter._open_session = fake_open
+    asyncio.run(adapter._consent_session(lambda granted, message: results.append((granted, message))))
+    assert results[0][0] is False
+    assert adapter.ready is False
+    # Denial leaves the adapter on the clipboard default (state stays usable).
+    assert adapter.status.backend == "clipboard"
+    assert adapter.status.state == AdapterState.READY
+
+
+def test_wayland_output_adapter_receives_config(monkeypatch):
+    monkeypatch.setattr(input_output.platform, "system", lambda: "Linux")
+    monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
+    cfg = _AutopasteConfig("granted")
+    adapter = input_output.create_text_output_adapter(cfg)
+    assert isinstance(adapter, RemoteDesktopPasteAdapter)
+    assert adapter._consent_state() == "granted"
+
+
 def test_trigger_is_honored_in_pynput_adapter():
     class Key:
         name = "f9"

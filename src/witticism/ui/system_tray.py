@@ -9,6 +9,7 @@ from witticism.core.continuous_transcriber import ContinuousTranscriber
 from witticism.ui.about_dialog import AboutDialog
 from witticism.ui.settings_dialog import SettingsDialog
 from witticism.ui.cuda_health_dialog import CudaHealthDialog
+from witticism.ui.autopaste_prompt import AutopasteConsent, show_priming_dialog
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,10 @@ class TranscriptionWorker(QThread):
 
 
 class SystemTrayApp(QSystemTrayIcon):
+    # Result of an auto-paste consent flow, emitted from the D-Bus runtime
+    # thread and handled on the GUI thread (Qt marshals cross-thread signals).
+    autopaste_result = pyqtSignal(bool, str)
+
     def __init__(self, parent=None):
         super().__init__(parent)
 
@@ -61,6 +66,7 @@ class SystemTrayApp(QSystemTrayIcon):
         self.output_manager = None
         self.config_manager = None
         self.dependency_validator = None  # For CUDA health checks
+        self.autopaste_consent = None  # AutopasteConsent controller (Wayland)
 
         self.is_recording = False
         self.is_enabled = True
@@ -141,6 +147,12 @@ class SystemTrayApp(QSystemTrayIcon):
         self.menu.addAction(self.cuda_health_action)
 
         self.menu.addSeparator()
+
+        # Enable automatic paste (Wayland only; shown when not yet granted)
+        self.autopaste_action = QAction("Enable automatic paste...", self)
+        self.autopaste_action.triggered.connect(self.prompt_autopaste)
+        self.autopaste_action.setVisible(False)  # Hidden until we know the session
+        self.menu.addAction(self.autopaste_action)
 
         # Settings action
         self.settings_action = QAction("Settings...", self)
@@ -467,6 +479,7 @@ class SystemTrayApp(QSystemTrayIcon):
             self._reset_no_speech_counter()
             if self.output_manager:
                 self.output_manager.output_text(text)
+                self._maybe_offer_autopaste()
 
     def on_transcription_error(self, error):
         self.set_status("Error")
@@ -747,6 +760,66 @@ class SystemTrayApp(QSystemTrayIcon):
         """Handle continuous transcription text output"""
         if text and self.output_manager and self.is_dictating:
             self.output_manager.output_text(text)
+            self._maybe_offer_autopaste()
+
+    # -- Auto-paste consent (Wayland) --------------------------------------
+
+    def _maybe_offer_autopaste(self):
+        """Offer the auto-paste priming dialog once, after a real transcription.
+
+        The value moment - the user's text just landed on the clipboard - is
+        when the offer makes sense. Guarded so it is shown at most once ever and
+        never at startup. Marks the prompt as seen immediately (before the modal)
+        so a crash mid-dialog cannot re-trigger it.
+        """
+        consent = self.autopaste_consent
+        if not consent or not consent.should_auto_prompt():
+            return
+        consent.mark_prompted()
+        # Defer to the next event-loop turn so we do not open a modal from inside
+        # a transcription-complete slot.
+        QTimer.singleShot(0, self.prompt_autopaste)
+
+    def prompt_autopaste(self):
+        """Show the in-app priming dialog and act on the choice.
+
+        Used both by the one-time automatic offer and the manual tray entry.
+        """
+        consent = self.autopaste_consent
+        if not consent:
+            return
+        consent.mark_prompted()
+        if show_priming_dialog():
+            # User opted in: start the portal session (the only place GNOME's
+            # permission dialog appears). Result comes back on the D-Bus thread.
+            if self.output_manager:
+                self.output_manager.request_autopaste(self._emit_autopaste_result)
+        else:
+            consent.decline()
+            self.autopaste_action.setVisible(consent.can_offer())
+
+    def _emit_autopaste_result(self, granted, message):
+        """Bridge the adapter's D-Bus-thread callback onto the GUI thread."""
+        self.autopaste_result.emit(bool(granted), message or "")
+
+    def _on_autopaste_result(self, granted, message):
+        """GUI-thread handler for the resolved consent flow."""
+        consent = self.autopaste_consent
+        if granted:
+            if consent:
+                consent.grant()
+                self.autopaste_action.setVisible(consent.can_offer())
+            self.show_notification(
+                "Automatic paste enabled",
+                "Dictated text will now be pasted into the active app.",
+            )
+        else:
+            # Consent stays unset so the user can retry from the tray menu.
+            self.show_notification(
+                "Automatic paste not enabled",
+                "Transcripts are copied to the clipboard. You can enable "
+                "automatic paste later from the tray menu.",
+            )
 
     def change_audio_device(self, device_index: Optional[int]):
         # Update checkmarks
@@ -905,6 +978,16 @@ class SystemTrayApp(QSystemTrayIcon):
         self.hotkey_manager = hotkey_manager
         self.output_manager = output_manager
         self.config_manager = config_manager
+
+        # Auto-paste consent (Wayland only). The manual tray entry is shown when
+        # the feature is available and consent has not yet been granted.
+        supported = bool(output_manager and output_manager.autopaste_supported())
+        self.autopaste_consent = AutopasteConsent(config_manager, supported=supported)
+        self.autopaste_action.setVisible(self.autopaste_consent.can_offer())
+        try:
+            self.autopaste_result.connect(self._on_autopaste_result)
+        except Exception:
+            pass
 
         # Update PTT action text with actual configured hotkey
         if self.config_manager:

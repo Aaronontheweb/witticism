@@ -122,7 +122,7 @@ def test_doctor_json_has_expected_keys_and_no_forbidden_names(monkeypatch, capsy
     }
     assert expected_keys.issubset(payload.keys())
     assert payload["shortcut_capability"] in ("hold-to-talk", "press-to-toggle (fallback)", "unavailable")
-    assert payload["output_capability"] in ("portal paste", "typing", "clipboard-only")
+    assert payload["output_capability"] in ("portal paste", "typing", "clipboard")
     # Pynput backend maps to full hold-to-talk / typing.
     assert payload["shortcut_capability"] == "hold-to-talk"
     assert payload["output_capability"] == "typing"
@@ -149,6 +149,43 @@ def test_doctor_reports_press_to_toggle_fallback_tier(monkeypatch, capsys):
     assert payload["keybinding_registered"] is True
     # Degraded GNOME session should guide the user toward the optional extension.
     assert "install-gnome-extension" in payload["how_to_improve"]
+
+
+def test_doctor_reports_portal_paste_when_autopaste_granted(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_safe_portal_interfaces", lambda: {cli.REMOTE_DESKTOP})
+    monkeypatch.setattr(cli, "_probe_shortcut", lambda: ("xdg-global-shortcuts", "ready", None))
+    monkeypatch.setattr(cli, "_probe_output", lambda: "xdg-remote-desktop")
+    monkeypatch.setattr(cli, "_probe_extension", lambda: (False, False))
+    monkeypatch.setattr(cli, "_restore_grant_present", lambda: True)
+    monkeypatch.setattr(cli, "_autopaste_consent", lambda: "granted")
+    monkeypatch.setattr(cli, "_keybinding_registered", lambda: False)
+
+    rc = cli.doctor(as_json=True)
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["autopaste_consent"] == "granted"
+    # Portal paste only reported when granted AND a restore token exists.
+    assert payload["output_capability"] == "portal paste"
+
+
+def test_doctor_output_clipboard_and_hint_when_autopaste_unset(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_safe_portal_interfaces", lambda: {cli.REMOTE_DESKTOP})
+    monkeypatch.setattr(cli, "_probe_shortcut", lambda: ("xdg-global-shortcuts", "ready", None))
+    monkeypatch.setattr(cli, "_probe_output", lambda: "xdg-remote-desktop")
+    monkeypatch.setattr(cli, "_probe_extension", lambda: (False, False))
+    monkeypatch.setattr(cli, "_restore_grant_present", lambda: False)
+    monkeypatch.setattr(cli, "_autopaste_consent", lambda: "unset")
+    monkeypatch.setattr(cli, "_keybinding_registered", lambda: False)
+    monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
+    monkeypatch.setenv("XDG_CURRENT_DESKTOP", "GNOME")
+
+    rc = cli.doctor(as_json=True)
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    # Clipboard-first is the designed default, not a degradation.
+    assert payload["output_capability"] == "clipboard"
+    assert payload["autopaste_consent"] == "unset"
+    assert "automatic paste" in payload["how_to_improve"].lower()
 
 
 def test_doctor_text_survives_dbus_unreachable(monkeypatch, capsys):
