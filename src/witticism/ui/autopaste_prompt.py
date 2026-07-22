@@ -1,4 +1,4 @@
-"""In-app priming for Wayland auto-paste consent.
+"""In-app priming for Wayland automatic typing consent.
 
 The decision logic lives in :class:`AutopasteConsent`, a plain-Python state
 machine with no Qt or D-Bus references, so it is fully unit-testable without
@@ -6,7 +6,7 @@ PyQt5. The Qt dialog (:func:`show_priming_dialog`) imports PyQt5 lazily, so this
 module is importable in headless / test environments.
 
 The flow is modeled on an in-app permission-priming screen: Witticism explains,
-in its own branded dialog, what auto-paste does and that GNOME will show a
+in its own branded dialog, what automatic typing does and that GNOME will show a
 system confirmation next. Only if the user opts in do we start the portal
 session (the single place GNOME's dialog may appear). Clipboard-first remains
 the default until the user consents; see docs/adr/004.
@@ -22,25 +22,25 @@ from witticism.platform.input_output import (
 
 logger = logging.getLogger(__name__)
 
-PRIMING_TITLE = "Enable automatic paste?"
+PRIMING_TITLE = "Enable automatic typing?"
 PRIMING_BODY = (
-    "Witticism can insert dictated text directly into the active app. "
+    "Witticism can insert dictated text directly into the active app by typing it. "
     "If you enable this, GNOME will show a system confirmation next "
     "(it is titled \"Remote Desktop\" - the request comes from Witticism and "
     "covers keyboard input only). You can change this anytime from the tray menu."
 )
-PRIMING_ENABLE = "Enable automatic paste"
+PRIMING_ENABLE = "Enable automatic typing"
 PRIMING_NOT_NOW = "Not now"
 
 
 class AutopasteConsent:
-    """Plain-Python state machine for the Wayland auto-paste consent flow.
+    """Plain-Python state machine for the Wayland automatic typing consent flow.
 
     All state is read from / written to a config manager (dot-keys
     ``output.autopaste`` and ``output.autopaste_prompted``). It holds no Qt or
     D-Bus references so it can be driven directly in tests.
 
-    ``supported`` is True only where auto-paste is actually available (the
+    ``supported`` is True only where automatic typing is actually available (the
     Wayland Remote Desktop output adapter); elsewhere the feature is never
     offered.
     """
@@ -63,10 +63,10 @@ class AutopasteConsent:
         return bool(self.config.get("output.autopaste_prompted", False))
 
     def can_offer(self):
-        """Whether offering auto-paste is meaningful at all right now.
+        """Whether offering automatic typing is meaningful at all right now.
 
         True on a supported (Wayland) session when consent has not been granted;
-        drives visibility of the manual "Enable automatic paste..." tray item.
+        drives visibility of the manual "Enable automatic typing..." tray item.
         """
         return self.supported and self.state() != AUTOPASTE_GRANTED
 

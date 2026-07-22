@@ -378,6 +378,10 @@ class WitticismApp:
         # Start hotkey manager
         self.hotkey_manager.start()
         status = self.hotkey_manager.status
+        # The hotkey status is final only after start(); refresh the tray icon so
+        # an unusable adapter shows the degraded health indicator immediately.
+        if self.tray_app and hasattr(self.tray_app, "refresh_health"):
+            self.tray_app.refresh_health()
         if self.tray_app and not status.usable:
             guidance = f"\n\n{status.recovery_action}" if status.recovery_action else ""
             self.tray_app.showMessage(

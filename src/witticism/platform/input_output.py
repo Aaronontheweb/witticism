@@ -42,14 +42,16 @@ DBUS_PATH = "/org/freedesktop/DBus"
 GNOME_EXTENSION_RECOVERY = (
     "Run: witticism-platform install-gnome-extension, then log out and back in"
 )
-# Auto-paste consent (config key output.autopaste). Clipboard-first is the
-# designed Wayland default; the Remote Desktop portal - and GNOME's permission
-# dialog - is only touched after the user explicitly consents.
+# Automatic-typing consent. The config key is output.autopaste for historical
+# reasons (it predates the switch from Ctrl+V paste to keysym typing); the
+# feature is user-facing as "automatic typing". Clipboard-first is the designed
+# Wayland default; the Remote Desktop portal - and GNOME's permission dialog -
+# is only touched after the user explicitly consents.
 AUTOPASTE_UNSET = "unset"
 AUTOPASTE_GRANTED = "granted"
 AUTOPASTE_DECLINED = "declined"
-CLIPBOARD_WAYLAND_MESSAGE = "Transcripts are copied to the clipboard - paste with Ctrl+V"
-AUTOPASTE_REENABLE_RECOVERY = "Re-enable automatic paste from the tray menu"
+CLIPBOARD_WAYLAND_MESSAGE = "Transcripts are copied to the clipboard - paste with Ctrl+V (Ctrl+Shift+V in a terminal)"
+AUTOPASTE_REENABLE_RECOVERY = "Re-enable automatic typing from the tray menu"
 GLOBAL_SHORTCUTS_XML = """<node>
   <interface name="org.freedesktop.portal.GlobalShortcuts">
     <method name="CreateSession"><arg type="a{sv}" direction="in"/><arg type="o" direction="out"/></method>
@@ -1076,10 +1078,27 @@ class ClipboardTextOutputAdapter(TextOutputAdapter):
     def stop(self): pass
 
 
-class RemoteDesktopPasteAdapter(TextOutputAdapter):
-    """Wayland auto-paste via the Remote Desktop portal - strictly consent-gated.
+def _char_to_keysym(ch):
+    """Map a character to an X11 keysym for portal keyboard injection.
 
-    Auto-paste is OFF by default. The adapter never touches the Remote Desktop
+    Printable ASCII (0x20-0x7E) is its own codepoint; any other codepoint uses
+    the Unicode keysym range (0x01000000 + codepoint). Newline and tab map to
+    Return/Tab. Keysyms carry case and symbols, so no shift is synthesized.
+    """
+    if ch in ("\n", "\r"):
+        return 0xFF0D  # XK_Return
+    if ch == "\t":
+        return 0xFF09  # XK_Tab
+    codepoint = ord(ch)
+    if 0x20 <= codepoint <= 0x7E:
+        return codepoint
+    return 0x01000000 + codepoint
+
+
+class RemoteDesktopTypeAdapter(TextOutputAdapter):
+    """Wayland automatic typing via the Remote Desktop portal - consent-gated.
+
+    Automatic typing is OFF by default. The adapter never touches the Remote Desktop
     portal (no probe, no session, no dialog) until the user has explicitly
     consented through ``request_autopaste()``. Until then it behaves exactly as
     the designed clipboard-only output. A previously granted session is restored
@@ -1095,9 +1114,9 @@ class RemoteDesktopPasteAdapter(TextOutputAdapter):
         self.interface = None
         self.session = None
         self.ready = False
-        # Optional UI callback fired when auto-paste is lost (revoked from the
-        # system indicator, or a paste failed because the session went away) so
-        # the tray can re-surface its "Enable automatic paste..." entry.
+        # Optional UI callback fired when automatic typing is lost (revoked from
+        # the system indicator, or an injection failed because the session went
+        # away) so the tray can re-surface its "Enable automatic typing..." entry.
         self.on_revoked = None
         self.status = AdapterStatus(AdapterState.STARTING, "xdg-remote-desktop")
         state_dir = Path(platformdirs.user_state_dir("witticism"))
@@ -1112,7 +1131,7 @@ class RemoteDesktopPasteAdapter(TextOutputAdapter):
             return AUTOPASTE_UNSET
 
     def start(self):
-        # Designed default: clipboard-only unless the user has enabled auto-paste.
+        # Designed default: clipboard-only unless the user enabled automatic typing.
         # No portal probe or session is issued in this path, so no dialog appears.
         if self._consent_state() != AUTOPASTE_GRANTED:
             self.ready = False
@@ -1124,7 +1143,7 @@ class RemoteDesktopPasteAdapter(TextOutputAdapter):
             self.ready = False
             self.status = AdapterStatus(
                 AdapterState.DEGRADED, "clipboard",
-                "Automatic paste needs to be re-enabled", AUTOPASTE_REENABLE_RECOVERY,
+                "Automatic typing needs to be re-enabled", AUTOPASTE_REENABLE_RECOVERY,
             )
             return self.status
         # Granted with a saved token: restore the session silently (no dialog).
@@ -1143,7 +1162,7 @@ class RemoteDesktopPasteAdapter(TextOutputAdapter):
         try:
             self.runtime.submit(self._consent_session(on_result))
         except Exception as exc:
-            logger.warning("[PLATFORM_ADAPTER] Auto-paste consent flow failed to start: %s", exc)
+            logger.warning("[PLATFORM_ADAPTER] Automatic-typing consent flow failed to start: %s", exc)
             if on_result:
                 on_result(False, str(exc))
 
@@ -1222,7 +1241,7 @@ class RemoteDesktopPasteAdapter(TextOutputAdapter):
 
     async def _subscribe_session_closed(self):
         """Watch the portal session's Closed signal so a mid-session revocation
-        (e.g. the user turning auto-paste off from GNOME's system indicator) is
+        (e.g. the user turning automatic typing off from GNOME's system indicator) is
         noticed instead of dying silently."""
         try:
             from dbus_next.introspection import Node
@@ -1234,7 +1253,7 @@ class RemoteDesktopPasteAdapter(TextOutputAdapter):
             logger.debug("[PLATFORM_ADAPTER] Could not watch session Closed signal: %s", exc)
 
     def _on_session_closed(self, *_args):
-        logger.info("[PLATFORM_ADAPTER] Remote Desktop session was closed by the system; auto-paste revoked")
+        logger.info("[PLATFORM_ADAPTER] Remote Desktop session was closed by the system; automatic typing revoked")
         self._handle_revocation()
 
     def _handle_revocation(self):
@@ -1246,7 +1265,7 @@ class RemoteDesktopPasteAdapter(TextOutputAdapter):
         self._reset_consent()
         self.status = AdapterStatus(
             AdapterState.DEGRADED, "clipboard",
-            "Automatic paste was turned off from the system indicator - transcripts stay on the clipboard",
+            "Automatic typing was turned off from the system indicator - transcripts stay on the clipboard",
             AUTOPASTE_REENABLE_RECOVERY,
         )
         self._notify_revoked()
@@ -1281,14 +1300,14 @@ class RemoteDesktopPasteAdapter(TextOutputAdapter):
         try:
             await self._open_session()
             self.status = AdapterStatus(AdapterState.READY, "xdg-remote-desktop")
-            logger.info("[PLATFORM_ADAPTER] Remote Desktop paste restored")
+            logger.info("[PLATFORM_ADAPTER] Remote Desktop typing restored")
         except Exception as exc:
             self.ready = False
             self.status = AdapterStatus(
                 AdapterState.DEGRADED, "clipboard",
-                "Automatic paste needs to be re-enabled", AUTOPASTE_REENABLE_RECOVERY,
+                "Automatic typing needs to be re-enabled", AUTOPASTE_REENABLE_RECOVERY,
             )
-            logger.warning("[PLATFORM_ADAPTER] Auto-paste session could not be restored: %s", exc)
+            logger.warning("[PLATFORM_ADAPTER] Automatic-typing session could not be restored: %s", exc)
 
     async def _consent_session(self, on_result):
         """Consent path: the only place a fresh portal prompt may appear."""
@@ -1298,23 +1317,44 @@ class RemoteDesktopPasteAdapter(TextOutputAdapter):
             await self._open_session()
             granted = True
             self.status = AdapterStatus(AdapterState.READY, "xdg-remote-desktop")
-            logger.info("[PLATFORM_ADAPTER] Remote Desktop paste enabled")
+            logger.info("[PLATFORM_ADAPTER] Remote Desktop typing enabled")
         except Exception as exc:
             self.ready = False
             message = str(exc)
             self.status = AdapterStatus(AdapterState.READY, "clipboard", CLIPBOARD_WAYLAND_MESSAGE)
-            logger.info("[PLATFORM_ADAPTER] Auto-paste was not enabled: %s", exc)
+            logger.info("[PLATFORM_ADAPTER] Automatic typing was not enabled: %s", exc)
         finally:
             if on_result:
                 on_result(granted, message)
 
-    async def _paste(self):
-        await self.interface.call_notify_keyboard_keysym(self.session, {}, 0xFFE3, 1)
+    def _type_delay_s(self):
+        # Typing is fast enough to send keysyms back-to-back on every desktop we
+        # have tested; a small inter-key delay is available only as an escape
+        # hatch (output.wayland_type_delay_ms, default 0).
+        if self.config is None:
+            return 0.0
         try:
-            await self.interface.call_notify_keyboard_keysym(self.session, {}, ord("v"), 1)
-            await self.interface.call_notify_keyboard_keysym(self.session, {}, ord("v"), 0)
-        finally:
-            await self.interface.call_notify_keyboard_keysym(self.session, {}, 0xFFE3, 0)
+            ms = int(self.config.get("output.wayland_type_delay_ms", 0) or 0)
+        except Exception:
+            ms = 0
+        return max(ms, 0) / 1000.0
+
+    async def _type_text(self, text):
+        """Type ``text`` character by character via the Remote Desktop portal.
+
+        We inject the transcript itself as keysyms rather than synthesizing a
+        Ctrl+V chord: a chord is interpreted differently across apps (terminals
+        paste on Ctrl+Shift+V and read a bare Ctrl+V as quoted-insert), while
+        typed characters land everywhere - matching the X11 typing path. Each
+        keysym carries its own case/symbol, so no shift modifier is synthesized.
+        """
+        delay = self._type_delay_s()
+        for ch in text:
+            keysym = _char_to_keysym(ch)
+            await self.interface.call_notify_keyboard_keysym(self.session, {}, keysym, 1)  # press
+            await self.interface.call_notify_keyboard_keysym(self.session, {}, keysym, 0)  # release
+            if delay:
+                await asyncio.sleep(delay)
 
     async def _close_session(self):
         if not self.bus or not self.session:
@@ -1324,51 +1364,50 @@ class RemoteDesktopPasteAdapter(TextOutputAdapter):
         self.session = None
 
     def output_text(self, text):
-        """Copy ``text`` and dispatch a paste keystroke without blocking.
+        """Copy ``text`` and dispatch automatic typing without blocking.
 
         Contract: MUST be called on the Qt GUI/main thread. The clipboard copy
         is performed synchronously here (Qt clipboard access is main-thread
-        only); the paste keystroke injection is submitted fire-and-forget to
-        the async D-Bus runtime so the GUI thread never waits on a portal
-        round-trip. A failed paste downgrades this adapter to DEGRADED
-        (clipboard-only) via the done-callback so later status queries stay
-        honest. The returned OutputResult reflects only what is known
-        synchronously: the clipboard succeeded and a paste was dispatched
-        (its eventual success is carried by ``status``, not the result).
+        only) and remains a safety net - if typing fails the user can still
+        paste manually (Ctrl+V, or Ctrl+Shift+V in a terminal). The keysym
+        injection is submitted fire-and-forget to the async D-Bus runtime so the
+        GUI thread never waits on a portal round-trip. A failed injection
+        downgrades this adapter to DEGRADED (clipboard-only) via the
+        done-callback so later status queries stay honest.
         """
         copied = _clipboard(text)
         if not copied.success:
             return copied
         if not self.ready:
             # Clipboard-only is the designed default until the user enables
-            # auto-paste; report a clean success with no per-transcript warning.
+            # automatic typing; report a clean success with no per-transcript warning.
             return OutputResult(True, False)
         try:
-            future = self.runtime.submit(self._paste())
+            future = self.runtime.submit(self._type_text(text))
         except Exception as exc:
             self._downgrade(exc)
-            return OutputResult(True, False, f"Copied to clipboard; automatic paste failed: {exc}")
-        future.add_done_callback(self._on_paste_done)
+            return OutputResult(True, False, f"Copied to clipboard; automatic typing failed: {exc}")
+        future.add_done_callback(self._on_type_done)
         return OutputResult(True, True)
 
-    def _on_paste_done(self, future):
+    def _on_type_done(self, future):
         try:
             future.result()
         except Exception as exc:
             self._downgrade(exc)
 
     def _downgrade(self, exc):
-        # A paste failed (often because the session went away just before its
+        # Typing failed (often because the session went away just before its
         # Closed signal arrived). The transcript is already on the clipboard -
-        # copied before paste - so this only affects future pastes. Closed, if
-        # it follows, does the authoritative consent reset.
+        # copied first - so this only affects future output. Closed, if it
+        # follows, does the authoritative consent reset.
         self.ready = False
         self.status = AdapterStatus(
             AdapterState.DEGRADED, "clipboard",
-            "Automatic paste stopped working - transcripts stay on the clipboard",
+            "Automatic typing stopped working - transcripts stay on the clipboard",
             AUTOPASTE_REENABLE_RECOVERY,
         )
-        logger.warning("[PLATFORM_ADAPTER] Auto-paste failed; clipboard fallback active: %s", exc)
+        logger.warning("[PLATFORM_ADAPTER] Auto-typing failed; clipboard fallback active: %s", exc)
         self._notify_revoked()
 
     def copy_to_clipboard(self, text): return _clipboard(text)
@@ -1553,5 +1592,5 @@ def create_text_output_adapter(config_manager=None):
     if system == "windows" or (system == "linux" and session != "wayland"):
         return PynputTextOutputAdapter()
     if system == "linux" and session == "wayland":
-        return RemoteDesktopPasteAdapter(config_manager)
+        return RemoteDesktopTypeAdapter(config_manager)
     return ClipboardTextOutputAdapter()

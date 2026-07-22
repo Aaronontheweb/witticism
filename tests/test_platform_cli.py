@@ -123,7 +123,7 @@ def test_doctor_json_has_expected_keys_and_no_forbidden_names(monkeypatch, capsy
     }
     assert expected_keys.issubset(payload.keys())
     assert payload["shortcut_capability"] in ("hold-to-talk", "press-to-toggle (fallback)", "unavailable")
-    assert payload["output_capability"] in ("portal paste", "typing", "clipboard")
+    assert payload["output_capability"] in ("portal typing", "typing", "clipboard")
     # Pynput backend maps to full hold-to-talk / typing.
     assert payload["shortcut_capability"] == "hold-to-talk"
     assert payload["output_capability"] == "typing"
@@ -173,7 +173,7 @@ def test_doctor_reports_hold_to_talk_when_key_repeat_enabled(monkeypatch, capsys
     assert payload["keyboard_repeat_enabled"] is True
 
 
-def test_doctor_reports_portal_paste_when_autopaste_granted(monkeypatch, capsys):
+def test_doctor_reports_portal_typing_when_autopaste_granted(monkeypatch, capsys):
     monkeypatch.setattr(cli, "_safe_portal_interfaces", lambda: {cli.REMOTE_DESKTOP})
     monkeypatch.setattr(cli, "_probe_shortcut", lambda: ("xdg-global-shortcuts", "ready", None))
     monkeypatch.setattr(cli, "_probe_output", lambda: "xdg-remote-desktop")
@@ -187,8 +187,8 @@ def test_doctor_reports_portal_paste_when_autopaste_granted(monkeypatch, capsys)
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["autopaste_consent"] == "granted"
-    # Portal paste only reported when granted AND a restore token exists.
-    assert payload["output_capability"] == "portal paste"
+    # Portal typing only reported when granted AND a restore token exists.
+    assert payload["output_capability"] == "portal typing"
 
 
 def test_doctor_output_clipboard_and_hint_when_autopaste_unset(monkeypatch, capsys):
@@ -209,7 +209,7 @@ def test_doctor_output_clipboard_and_hint_when_autopaste_unset(monkeypatch, caps
     # Clipboard-first is the designed default, not a degradation.
     assert payload["output_capability"] == "clipboard"
     assert payload["autopaste_consent"] == "unset"
-    assert "automatic paste" in payload["how_to_improve"].lower()
+    assert "automatic typing" in payload["how_to_improve"].lower()
 
 
 def test_doctor_text_survives_dbus_unreachable(monkeypatch, capsys):

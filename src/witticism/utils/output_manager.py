@@ -19,7 +19,7 @@ class OutputManager:
         )
 
     def autopaste_supported(self) -> bool:
-        """Whether the active output adapter can offer consent-gated auto-paste.
+        """Whether the active output adapter can offer consent-gated automatic typing.
 
         True only for the Wayland Remote Desktop adapter; elsewhere (typing,
         forced clipboard, macOS) the feature is never offered.
@@ -27,7 +27,7 @@ class OutputManager:
         return hasattr(self.adapter, "request_autopaste")
 
     def set_autopaste_revoked_callback(self, callback) -> None:
-        """Register a callback fired when auto-paste is lost mid-session (e.g.
+        """Register a callback fired when automatic typing is lost mid-session (e.g.
         revoked from the system indicator). No-op if unsupported."""
         if hasattr(self.adapter, "on_revoked"):
             self.adapter.on_revoked = callback
@@ -41,7 +41,7 @@ class OutputManager:
         requester = getattr(self.adapter, "request_autopaste", None)
         if requester is None:
             if on_result:
-                on_result(False, "Automatic paste is not available here")
+                on_result(False, "Automatic typing is not available here")
             return False
         requester(on_result)
         return True

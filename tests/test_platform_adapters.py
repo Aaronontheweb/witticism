@@ -18,7 +18,7 @@ from witticism.platform.input_output import (
     GnomeShellShortcutAdapter,
     OutputResult,
     PynputShortcutAdapter,
-    RemoteDesktopPasteAdapter,
+    RemoteDesktopTypeAdapter,
     ShortcutBinding,
     ShortcutEvent,
     ShortcutEventType,
@@ -229,26 +229,68 @@ def test_static_portal_interfaces_are_valid():
     assert remote_node.interfaces[0].name == input_output.REMOTE_DESKTOP
 
 
-def test_remote_desktop_releases_control_after_paste_failure():
+def test_char_to_keysym_mapping():
+    to = input_output._char_to_keysym
+    # Printable ASCII maps to its own codepoint (case/symbols carried directly).
+    assert to("a") == ord("a")
+    assert to("A") == ord("A")
+    assert to("Z") == ord("Z")
+    assert to("1") == ord("1")
+    assert to(" ") == 0x20
+    assert to("~") == 0x7E
+    assert to("!") == ord("!")
+    # Non-ASCII -> Unicode keysym (0x01000000 + codepoint).
+    assert to("é") == 0x01000000 + ord("é")
+    assert to("emoji"[0]) == ord("e")  # sanity: ascii unaffected
+    assert to("\U0001F600") == 0x01000000 + 0x1F600  # grinning face emoji
+    # Whitespace controls.
+    assert to("\n") == 0xFF0D  # XK_Return
+    assert to("\r") == 0xFF0D
+    assert to("\t") == 0xFF09  # XK_Tab
+
+
+def test_type_text_emits_press_release_per_char_in_order():
     class Interface:
         def __init__(self):
             self.calls = []
 
         async def call_notify_keyboard_keysym(self, session, options, keysym, state):
             self.calls.append((keysym, state))
-            if keysym == ord("v") and state == 1:
-                raise RuntimeError("injected failure")
 
-    adapter = RemoteDesktopPasteAdapter()
+    adapter = RemoteDesktopTypeAdapter()
     adapter.interface = Interface()
     adapter.session = "/session/1"
+    asyncio.run(adapter._type_text("Hi\n"))
+    # Each character is a press (1) then release (0), in order, no modifiers.
+    assert adapter.interface.calls == [
+        (ord("H"), 1), (ord("H"), 0),
+        (ord("i"), 1), (ord("i"), 0),
+        (0xFF0D, 1), (0xFF0D, 0),
+    ]
+
+
+def test_type_text_failure_midway_propagates():
+    class Interface:
+        def __init__(self):
+            self.calls = []
+
+        async def call_notify_keyboard_keysym(self, session, options, keysym, state):
+            self.calls.append((keysym, state))
+            if keysym == ord("i") and state == 1:
+                raise RuntimeError("session is gone")
+
+    adapter = RemoteDesktopTypeAdapter()
+    adapter.interface = Interface()
+    adapter.session = "/session/1"
+    # A mid-type failure surfaces to the done-callback path (which degrades).
     with pytest.raises(RuntimeError):
-        asyncio.run(adapter._paste())
-    assert adapter.interface.calls[-1] == (0xFFE3, 0)
+        asyncio.run(adapter._type_text("Hi"))
+    # It failed on the 'i' press, after fully emitting 'H'.
+    assert adapter.interface.calls[:2] == [(ord("H"), 1), (ord("H"), 0)]
 
 
 def test_portal_restore_token_is_private_and_rotated(tmp_path):
-    adapter = RemoteDesktopPasteAdapter()
+    adapter = RemoteDesktopTypeAdapter()
     adapter.token_file = tmp_path / "state" / "wayland-portal.json"
     adapter._store_token("first")
     assert adapter._load_token() == "first"
@@ -259,7 +301,7 @@ def test_portal_restore_token_is_private_and_rotated(tmp_path):
 
 
 def test_token_file_created_0600_without_chmod_window(tmp_path, monkeypatch):
-    adapter = RemoteDesktopPasteAdapter()
+    adapter = RemoteDesktopTypeAdapter()
     adapter.token_file = tmp_path / "state" / "wayland-portal.json"
 
     real_open = os.open
@@ -284,7 +326,7 @@ def test_token_file_created_0600_without_chmod_window(tmp_path, monkeypatch):
 
 
 def test_remote_desktop_output_text_is_non_blocking(monkeypatch):
-    adapter = RemoteDesktopPasteAdapter()
+    adapter = RemoteDesktopTypeAdapter()
     adapter.ready = True
 
     class NeverRuntime:
@@ -294,7 +336,7 @@ def test_remote_desktop_output_text_is_non_blocking(monkeypatch):
             self.submitted = 0
 
         def submit(self, coroutine):
-            # Do not run the paste coroutine; return a future that never resolves.
+            # Do not run the typing coroutine; return a future that never resolves.
             coroutine.close()
             self.submitted += 1
             return self.future
@@ -310,7 +352,7 @@ def test_remote_desktop_output_text_is_non_blocking(monkeypatch):
     result = adapter.output_text("hello world")
     elapsed = time.monotonic() - started
 
-    # Returns immediately with an optimistic result even though the paste future
+    # Returns immediately with an optimistic result even though the typing future
     # is still pending (never resolved) -- i.e. the GUI thread did not block.
     assert result.success is True
     assert result.pasted is True
@@ -318,15 +360,15 @@ def test_remote_desktop_output_text_is_non_blocking(monkeypatch):
     assert runtime.submitted == 1
     assert not runtime.future.done()
 
-    # When the paste eventually fails, the done-callback downgrades the adapter.
-    runtime.future.set_exception(RuntimeError("paste boom"))
+    # When the typing eventually fails, the done-callback downgrades the adapter.
+    runtime.future.set_exception(RuntimeError("type boom"))
     assert adapter.ready is False
     assert adapter.status.state == AdapterState.DEGRADED
     assert adapter.status.backend == "clipboard"
 
 
 # ---------------------------------------------------------------------------
-# Auto-paste is consent-gated: the adapter must never touch the Remote Desktop
+# Automatic typing is consent-gated: the adapter must never touch the Remote Desktop
 # portal (no probe, no session, no dialog) until the user has granted it.
 # ---------------------------------------------------------------------------
 
@@ -357,7 +399,7 @@ def _paste_adapter(monkeypatch, autopaste, tmp_path, token=None):
         raise AssertionError("the Remote Desktop portal must not be touched at startup")
 
     monkeypatch.setattr(input_output, "portal_has_interface", _no_portal)
-    adapter = RemoteDesktopPasteAdapter(_AutopasteConfig(autopaste))
+    adapter = RemoteDesktopTypeAdapter(_AutopasteConfig(autopaste))
     adapter.runtime = _RecordingRuntime()
     adapter.token_file = tmp_path / "wayland-portal.json"
     if token is not None:
@@ -400,7 +442,7 @@ def test_autopaste_granted_without_token_does_not_reprompt(monkeypatch, tmp_path
 
 
 def test_request_autopaste_success_reports_granted():
-    adapter = RemoteDesktopPasteAdapter()
+    adapter = RemoteDesktopTypeAdapter()
     results = []
 
     async def fake_open():
@@ -415,7 +457,7 @@ def test_request_autopaste_success_reports_granted():
 
 
 def test_request_autopaste_denial_reports_not_granted():
-    adapter = RemoteDesktopPasteAdapter()
+    adapter = RemoteDesktopTypeAdapter()
     results = []
 
     async def fake_open():
@@ -435,13 +477,13 @@ def test_wayland_output_adapter_receives_config(monkeypatch):
     monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
     cfg = _AutopasteConfig("granted")
     adapter = input_output.create_text_output_adapter(cfg)
-    assert isinstance(adapter, RemoteDesktopPasteAdapter)
+    assert isinstance(adapter, RemoteDesktopTypeAdapter)
     assert adapter._consent_state() == "granted"
 
 
 # ---------------------------------------------------------------------------
 # Mid-session revocation: the portal Session Closed signal (e.g. the user turns
-# auto-paste off from GNOME's system indicator) must degrade cleanly and reset
+# automatic typing off from GNOME's system indicator) must degrade cleanly and reset
 # consent so the tray offer reappears.
 # ---------------------------------------------------------------------------
 
@@ -458,7 +500,7 @@ class _WritableConfig:
 
 def test_session_closed_revokes_resets_consent_and_deletes_token(tmp_path):
     cfg = _WritableConfig({"output.autopaste": "granted"})
-    adapter = RemoteDesktopPasteAdapter(cfg)
+    adapter = RemoteDesktopTypeAdapter(cfg)
     adapter.token_file = tmp_path / "wayland-portal.json"
     adapter.token_file.write_text('{"restore_token": "tok"}')
     adapter.ready = True
@@ -479,20 +521,20 @@ def test_session_closed_revokes_resets_consent_and_deletes_token(tmp_path):
     assert notified == [True]  # UI told to re-surface the "Enable..." offer
 
 
-def test_paste_failure_degrades_without_exception(monkeypatch):
-    adapter = RemoteDesktopPasteAdapter()
+def test_type_failure_degrades_without_exception(monkeypatch):
+    adapter = RemoteDesktopTypeAdapter()
     adapter.ready = True
     notified = []
     adapter.on_revoked = lambda: notified.append(True)
-    # Clipboard copy happens before the paste is dispatched, so the transcript
-    # is already delivered even when the (gone) session makes the paste fail.
+    # Clipboard copy happens before typing is dispatched, so the transcript
+    # is already delivered even when the (gone) session makes typing fail.
     monkeypatch.setattr(input_output, "_clipboard", lambda text: OutputResult(True, False))
 
     class GoneRuntime:
         loop = object()
 
         def submit(self, coroutine):
-            coroutine.close()  # do not run the paste coroutine
+            coroutine.close()  # do not run the typing coroutine
             future = concurrent.futures.Future()
             future.set_exception(RuntimeError("session is gone"))
             return future
@@ -505,7 +547,7 @@ def test_paste_failure_degrades_without_exception(monkeypatch):
 
     # No exception surfaced; the clipboard copy succeeded.
     assert result.success is True
-    # The failed paste degraded to clipboard and notified the UI.
+    # The failed typing degraded to clipboard and notified the UI.
     assert adapter.ready is False
     assert adapter.status.state == AdapterState.DEGRADED
     assert adapter.status.backend == "clipboard"

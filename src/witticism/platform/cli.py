@@ -232,7 +232,7 @@ def _restore_grant_present():
 
 
 def _autopaste_consent():
-    """Read the saved auto-paste consent state ("unset"/"granted"/"declined").
+    """Read the saved automatic typing consent state ("unset"/"granted"/"declined").
 
     Reads only our own config value; the opaque portal restore token lives in a
     separate 0600 state file and is never read or reported here.
@@ -307,15 +307,15 @@ def _shortcut_capability(backend, state, extension_loaded, keyboard_repeat=True)
 def _output_capability(backend, autopaste_consent="unset", token_present=False):
     """User-facing output tier.
 
-    "portal paste" is reported only when auto-paste has been granted AND a
-    restore token exists (so it would actually work). Clipboard-first is the
+    "portal typing" is reported only when automatic typing has been granted AND
+    a restore token exists (so it would actually work). Clipboard-first is the
     designed Wayland default, not a degradation.
     """
     b = (backend or "").lower()
-    if "pynput" in b or "typing" in b:
+    if "pynput" in b:
         return "typing"
     if "remote-desktop" in b and autopaste_consent == "granted" and token_present:
-        return "portal paste"
+        return "portal typing"
     return "clipboard"
 
 
@@ -342,7 +342,7 @@ def _how_to_improve(report):
         and report.get("autopaste_consent") in ("unset", "declined")
     ):
         return (
-            "Transcripts are copied to the clipboard. You can optionally enable automatic paste "
+            "Transcripts are copied to the clipboard. You can optionally enable automatic typing "
             "(a one-time GNOME permission) from the Witticism tray menu."
         )
     return None
@@ -361,7 +361,7 @@ def _render_doctor_text(report):
         f"  RemoteDesktop portal:    {yn(report['remote_desktop_portal'])}",
         f"  Shortcut backend:        {report['shortcut_adapter']} ({report['shortcut_capability']})",
         f"  Output backend:          {report['output_adapter']} ({report['output_capability']})",
-        f"  Automatic paste:         {report['autopaste_consent']}",
+        f"  Automatic typing:        {report['autopaste_consent']}",
         f"  GNOME extension:         installed={yn(report['gnome_extension_installed'])} "
         f"running={yn(report['gnome_extension_loaded'])}",
         f"  Portal restore grant:    {yn(report['portal_restore_permission_present'])}",
