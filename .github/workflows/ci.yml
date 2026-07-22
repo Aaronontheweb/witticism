@@ -65,19 +65,18 @@ jobs:
     - name: Install minimal test dependencies
       run: |
         python -m pip install --upgrade pip
-        # Install only non-GPU dependencies needed for tests
-        pip install platformdirs
-    
+        # Non-GPU dependencies needed to exercise the platform adapter and
+        # config/CLI tests. pytest runs the pytest-style adapter tests that
+        # `unittest discover` silently skipped, plus the unittest-style tests.
+        pip install pytest dbus-next platformdirs pyperclip pynput
+
     - name: Run all unit tests
       run: |
-        # Discover and run all tests in the tests directory
-        python -m unittest discover -s tests -p "test_*.py" -v
-    
+        # pytest natively runs both unittest-style and pytest-style tests.
+        python -m pytest tests/ -v
+
     - name: Test summary
       if: always()
       run: |
         echo "✓ Unit test run completed"
-        echo "Test discovery will automatically find:"
-        echo "  - All test_*.py files in tests/"
-        echo "  - All TestCase classes"
-        echo "  - All test_* methods"
+        echo "pytest ran every test_*.py under tests/ (unittest and pytest style)"
