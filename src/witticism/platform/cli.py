@@ -41,7 +41,7 @@ def _print_extension_disclosure():
     print("  - It runs inside the GNOME Shell process and observes keyboard")
     print("    events only to detect the shortcuts you have configured.")
     print("  - It forwards ONLY the matched shortcut identifiers and timestamps")
-    print("    to Witticism; it never sees, stores, or forwards your keystrokes.")
+    print("    to Witticism; your keystrokes are never stored or forwarded.")
     print("  - On Wayland it will NOT activate until you log out and back in.")
     print("")
     print("Why you might want it: it enables true hold-to-talk on GNOME Wayland")
