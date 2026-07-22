@@ -16,6 +16,8 @@ Use independent `ShortcutAdapter` and `TextOutputAdapter` contracts with automat
 
 The GNOME extension forwards only configured shortcut identifiers. It does not receive transcripts or perform text insertion. Portal restore tokens are isolated, permission-restricted state and are excluded from diagnostics and logs.
 
+How the GNOME extension is delivered is governed by [ADR-003](003-opt-in-gnome-extension-delivery.md): it is strictly opt-in via an explicit, consented `witticism-platform install-gnome-extension` command, `install.sh` only prints guidance, and the no-setup default on GNOME 46/47 Wayland is a press-to-toggle `org.gnome.Shell.GrabAccelerator` fallback.
+
 The normative lifecycle, support matrix, and adapter-authoring rules live in `docs/platform-adapters.md`.
 
 ## Consequences

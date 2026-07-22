@@ -28,6 +28,26 @@ Built to solve real GPU acceleration issues with whisper.cpp. WhisperX provides:
 - Better accuracy with less latency
 - Native Python integration that actually works
 
+## Platform support
+
+Witticism works out of the box, with full hold-to-talk (hold the hotkey to record, release to stop), on:
+
+- **Windows**
+- **Linux X11**
+- **Linux Wayland with the GlobalShortcuts portal** - KDE Plasma and GNOME 48+
+
+On **GNOME 46 / 47 Wayland**, which do not yet expose that portal, Witticism still works out of the box in **press-to-toggle** mode: press the hotkey once to start recording, and again to stop. For true hold-to-talk on these versions you can optionally install a small GNOME Shell extension:
+
+```bash
+witticism-platform install-gnome-extension
+```
+
+This step is entirely opt-in, prompts for confirmation, and requires you to **log out and back in** before it takes effect. The installer never deploys it for you.
+
+On Wayland, transcribed text is delivered by copying it to the clipboard and pasting with Ctrl+V through a keyboard-only portal session. The first paste triggers a **one-time system permission prompt**; if you decline, Witticism keeps the text on your clipboard so you can paste it yourself.
+
+Run `witticism-platform doctor` at any time to see which backends are active and how to improve them. See [docs/platform-adapters.md](docs/platform-adapters.md) for the full support matrix.
+
 ## Installation
 
 ### 🚀 Quick Install
@@ -64,7 +84,7 @@ If you prefer to install manually:
 ### Prerequisites
 
 - **Linux** (Ubuntu, Fedora, Debian, etc.)
-- **Linux display integration**: X11 and GNOME 46 / portal-capable Wayland sessions
+- **Linux display integration**: X11, Wayland with the GlobalShortcuts portal (KDE, GNOME 48+), or GNOME 46/47 Wayland (press-to-toggle by default; optional extension for hold-to-talk). See [Platform support](#platform-support).
 - **Python 3.10-3.12** (pipx will handle this)
 - **NVIDIA GPU** (optional but recommended for faster transcription)
 

@@ -39,7 +39,7 @@ class ConfigManager:
             },
             "hotkeys": {
                 "push_to_talk": "f9",
-                "toggle_enable": "<ctrl>+<alt>+m"
+                "mode_switch": "ctrl+alt+m"
             },
             "output": {
                 "mode": "type",
@@ -73,9 +73,18 @@ class ConfigManager:
                 with open(self.config_file, 'r') as f:
                     user_config = json.load(f)
 
+                # Apply one-time migrations to the raw user config before merging,
+                # so migration decisions are based on what the user actually saved
+                # and not on values injected by the default config.
+                migrated = self._migrate_user_config(user_config)
+
                 # Merge with defaults
                 self.config = self._deep_merge(copy.deepcopy(self.default_config), user_config)
                 logger.info(f"Config loaded from {self.config_file}")
+
+                # Persist so the migrated shape is written back to disk once.
+                if migrated:
+                    self.save_config()
 
             except Exception as e:
                 logger.error(f"Failed to load config: {e}")
@@ -85,6 +94,26 @@ class ConfigManager:
             self.save_config()  # Save defaults
 
         return self.config
+
+    def _migrate_user_config(self, user_config: Dict[str, Any]) -> bool:
+        """Apply in-place, idempotent migrations to a raw user config.
+
+        Returns True if the config was changed and should be persisted.
+
+        Migration: ``hotkeys.toggle_enable`` was renamed to
+        ``hotkeys.mode_switch``. If the user still has the old key, copy its
+        value over (unless ``mode_switch`` already exists, which wins), then
+        drop the dead key regardless.
+        """
+        hotkeys = user_config.get("hotkeys")
+        if not isinstance(hotkeys, dict) or "toggle_enable" not in hotkeys:
+            return False
+
+        if "mode_switch" not in hotkeys:
+            hotkeys["mode_switch"] = hotkeys["toggle_enable"]
+            logger.info("Migrated hotkeys.toggle_enable to hotkeys.mode_switch")
+        del hotkeys["toggle_enable"]
+        return True
 
     def save_config(self) -> None:
         try:
