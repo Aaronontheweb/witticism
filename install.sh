@@ -535,6 +535,26 @@ X-GNOME-Autostart-enabled=true
 EOF
 fi
 
+# GNOME Wayland hint only. The installer never side-loads or force-enables the
+# optional GNOME Shell extension; deploying it is strictly opt-in and consented
+# via `witticism-platform install-gnome-extension` (see docs/adr/003). This block
+# mutates nothing on the system - it only prints guidance.
+if [ "$WITTICISM_NO_DESKTOP" != "1" ] && [[ "${XDG_CURRENT_DESKTOP:-}" == *GNOME* ]] && \
+   { [ "${XDG_SESSION_TYPE:-}" = "wayland" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; }; then
+    echo ""
+    echo "ℹ️  GNOME Wayland detected."
+    echo "   Witticism works out of the box here with hold-to-talk: hold your"
+    echo "   hotkey to record, release to stop. (If you have key auto-repeat"
+    echo "   disabled, it works in press-to-toggle mode instead.)"
+    echo ""
+    echo "   For exact, repeat-independent release timing you can OPTIONALLY run:"
+    echo "     witticism-platform install-gnome-extension"
+    echo ""
+    echo "   That installs a GNOME Shell extension and requires you to log out"
+    echo "   and back in before it takes effect. It is entirely optional -"
+    echo "   without it, the hotkey already works."
+fi
+
 echo "✅ Installation complete!"
 echo ""
 if [ "$WITTICISM_NO_DESKTOP" != "1" ]; then

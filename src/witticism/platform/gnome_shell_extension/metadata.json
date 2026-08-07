@@ -1,0 +1,7 @@
+{
+  "uuid": "witticism@stannardlabs.com",
+  "name": "Witticism Push-to-Talk",
+  "description": "Secure Wayland push-to-talk shortcut bridge for Witticism",
+  "shell-version": ["46"],
+  "version": 1
+}

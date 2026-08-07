@@ -9,6 +9,8 @@ from witticism.core.continuous_transcriber import ContinuousTranscriber
 from witticism.ui.about_dialog import AboutDialog
 from witticism.ui.settings_dialog import SettingsDialog
 from witticism.ui.cuda_health_dialog import CudaHealthDialog
+from witticism.ui.autopaste_prompt import AutopasteConsent, show_priming_dialog
+from witticism.ui.tray_health import TrayHealth, compute_tray_health
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +53,13 @@ class TranscriptionWorker(QThread):
 
 
 class SystemTrayApp(QSystemTrayIcon):
+    # Result of an automatic typing consent flow, emitted from the D-Bus runtime
+    # thread and handled on the GUI thread (Qt marshals cross-thread signals).
+    autopaste_result = pyqtSignal(bool, str)
+    # Automatic typing was lost mid-session (revoked from the system indicator,
+    # or an injection failed because the session went away); D-Bus thread.
+    autopaste_revoked = pyqtSignal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
 
@@ -61,6 +70,9 @@ class SystemTrayApp(QSystemTrayIcon):
         self.output_manager = None
         self.config_manager = None
         self.dependency_validator = None  # For CUDA health checks
+        self.autopaste_consent = None  # AutopasteConsent controller (Wayland)
+        self._autopaste_broken = False  # granted-then-broken (revoked / restore failed)
+        self._last_status = "Ready"     # last status text, for health re-renders
 
         self.is_recording = False
         self.is_enabled = True
@@ -142,6 +154,12 @@ class SystemTrayApp(QSystemTrayIcon):
 
         self.menu.addSeparator()
 
+        # Automatic typing (Wayland only); permanent status row, label carries state
+        self.autopaste_action = QAction("Enable automatic typing...", self)
+        self.autopaste_action.triggered.connect(self.prompt_autopaste)
+        self.autopaste_action.setVisible(False)  # Hidden until we know the session
+        self.menu.addAction(self.autopaste_action)
+
         # Settings action
         self.settings_action = QAction("Settings...", self)
         self.settings_action.triggered.connect(self.show_settings)
@@ -194,11 +212,11 @@ class SystemTrayApp(QSystemTrayIcon):
         icon = QIcon(pixmap)
         self.setIcon(icon)
 
-    def update_icon_color(self, color: str):
+    def update_icon_color(self, color: str, warning: bool = False):
         pixmap = QPixmap(64, 64)
         pixmap.fill(Qt.transparent)
 
-        from PyQt5.QtGui import QPainter, QFont, QColor
+        from PyQt5.QtGui import QPainter, QFont, QColor, QPen
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.Antialiasing)
 
@@ -221,6 +239,15 @@ class SystemTrayApp(QSystemTrayIcon):
         font = QFont("Arial", 20, QFont.Bold)
         painter.setFont(font)
         painter.drawText(pixmap.rect(), Qt.AlignCenter, "W")
+
+        # Degraded-health badge: a small amber dot with a white ring in the
+        # bottom-right quadrant. It sits on top of the normal icon so the app
+        # still reads as "up, but something needs attention" - distinct from the
+        # full-orange CUDA-error icon.
+        if warning:
+            painter.setPen(QPen(QColor(255, 255, 255), 3))
+            painter.setBrush(QColor(255, 152, 0))
+            painter.drawEllipse(38, 38, 22, 22)
 
         painter.end()
 
@@ -322,6 +349,10 @@ class SystemTrayApp(QSystemTrayIcon):
             action.setChecked(action.data() == current_model)
 
     def set_status(self, status: str):
+        # Remember the caller's status so health changes (e.g. a revoked
+        # auto-typing session) can re-render the icon without a status change.
+        self._last_status = status
+
         # Build enhanced tooltip with device information
         tooltip_parts = ["Witticism"]
 
@@ -364,47 +395,57 @@ class SystemTrayApp(QSystemTrayIcon):
         self.setToolTip(" - ".join(tooltip_parts))
         self.status_action.setText(f"Status: {status}")
 
-        # Update icon color based on status and CUDA fallback
+        # Choose the base icon color from status and CUDA fallback.
         if self.engine and hasattr(self.engine, 'cuda_fallback') and self.engine.cuda_fallback:
             # Orange for CPU fallback mode
             if "Ready" in status:
-                self.update_icon_color("orange")
+                base_color = "orange"
             elif "Recording" in status or "Dictating" in status:
-                self.update_icon_color("red")
+                base_color = "red"
             elif "Transcribing" in status:
-                self.update_icon_color("yellow")
+                base_color = "yellow"
             else:
-                self.update_icon_color("orange")
+                base_color = "orange"
         else:
-            # Normal colors - Green for CUDA, different shades for CPU
-            if device_info and device_info.get('device') == 'cuda':
-                # CUDA mode - use green as primary color
-                if "Ready" in status:
-                    self.update_icon_color("green")
-                elif "Recording" in status:
-                    self.update_icon_color("red")
-                elif "Dictating" in status:
-                    self.update_icon_color("red")  # Red for active dictation
-                elif "Transcribing" in status:
-                    self.update_icon_color("yellow")
-                elif "Disabled" in status:
-                    self.update_icon_color("gray")
-                else:
-                    self.update_icon_color("green")
+            # Normal colors
+            if "Recording" in status or "Dictating" in status:
+                base_color = "red"
+            elif "Transcribing" in status:
+                base_color = "yellow"
+            elif "Disabled" in status:
+                base_color = "gray"
             else:
-                # CPU mode (intentional) - use slightly different color scheme
-                if "Ready" in status:
-                    self.update_icon_color("green")  # Still green, but we know it's CPU from tooltip
-                elif "Recording" in status:
-                    self.update_icon_color("red")
-                elif "Dictating" in status:
-                    self.update_icon_color("red")
-                elif "Transcribing" in status:
-                    self.update_icon_color("yellow")
-                elif "Disabled" in status:
-                    self.update_icon_color("gray")
-                else:
-                    self.update_icon_color("green")
+                base_color = "green"
+
+        # Overlay platform-health: a degraded tier (broken auto-typing / unusable
+        # hotkey) badges the icon amber and annotates the tooltip + Status row.
+        # Precedence is handled by compute_tray_health: real errors and live
+        # recording outrank degraded, so the badge only shows when idle.
+        health, reason = self._current_health()
+        degraded = health == TrayHealth.DEGRADED
+        self.update_icon_color(base_color, warning=degraded)
+        if degraded and reason:
+            self.setToolTip(f"Witticism - {reason}")
+            self.status_action.setText(f"Status: {status} - {reason}")
+
+    def _current_health(self):
+        """Compute the current tray health tier + reason from live state."""
+        error_active = bool(self.engine and getattr(self.engine, "cuda_fallback", False))
+        recording = bool(self.is_recording or self.is_dictating)
+        hotkey_usable = True
+        if self.hotkey_manager is not None:
+            status = getattr(self.hotkey_manager, "status", None)
+            hotkey_usable = bool(status.usable) if status is not None else True
+        autopaste_state = self.autopaste_consent.state() if self.autopaste_consent else "unset"
+        return compute_tray_health(
+            hotkey_usable, autopaste_state, self._autopaste_broken, error_active, recording
+        )
+
+    def refresh_health(self):
+        """Re-render the icon/tooltip for the current health without changing the
+        status text. Called after events that only affect health (hotkey start,
+        rebind, auto-typing granted/revoked/declined)."""
+        self.set_status(getattr(self, "_last_status", "Ready"))
 
     def toggle_enabled(self):
         self.is_enabled = not self.is_enabled
@@ -467,6 +508,7 @@ class SystemTrayApp(QSystemTrayIcon):
             self._reset_no_speech_counter()
             if self.output_manager:
                 self.output_manager.output_text(text)
+                self._maybe_offer_autopaste()
 
     def on_transcription_error(self, error):
         self.set_status("Error")
@@ -747,6 +789,105 @@ class SystemTrayApp(QSystemTrayIcon):
         """Handle continuous transcription text output"""
         if text and self.output_manager and self.is_dictating:
             self.output_manager.output_text(text)
+            self._maybe_offer_autopaste()
+
+    # -- Automatic typing consent (Wayland) --------------------------------------
+
+    def _maybe_offer_autopaste(self):
+        """Offer the automatic typing priming dialog once, after a real transcription.
+
+        The value moment - the user's text just landed on the clipboard - is
+        when the offer makes sense. Guarded so it is shown at most once ever and
+        never at startup. Marks the prompt as seen immediately (before the modal)
+        so a crash mid-dialog cannot re-trigger it.
+        """
+        consent = self.autopaste_consent
+        if not consent or not consent.should_auto_prompt():
+            return
+        consent.mark_prompted()
+        # Defer to the next event-loop turn so we do not open a modal from inside
+        # a transcription-complete slot.
+        QTimer.singleShot(0, self.prompt_autopaste)
+
+    def prompt_autopaste(self):
+        """Show the in-app priming dialog and act on the choice.
+
+        Used both by the one-time automatic offer and the manual tray entry.
+        """
+        consent = self.autopaste_consent
+        if not consent:
+            return
+        consent.mark_prompted()
+        if show_priming_dialog():
+            # User opted in: start the portal session (the only place GNOME's
+            # permission dialog appears). Result comes back on the D-Bus thread.
+            if self.output_manager:
+                self.output_manager.request_autopaste(self._emit_autopaste_result)
+        else:
+            # Declining after a revocation chooses the clipboard default -> the
+            # degraded state clears.
+            consent.decline()
+            self._autopaste_broken = False
+            self._refresh_autopaste_action()
+            self.refresh_health()
+
+    def _emit_autopaste_result(self, granted, message):
+        """Bridge the adapter's D-Bus-thread callback onto the GUI thread."""
+        self.autopaste_result.emit(bool(granted), message or "")
+
+    def _on_autopaste_result(self, granted, message):
+        """GUI-thread handler for the resolved consent flow."""
+        consent = self.autopaste_consent
+        if granted:
+            self._autopaste_broken = False  # working again -> clears degraded
+            if consent:
+                consent.grant()
+            self._refresh_autopaste_action()
+            self.refresh_health()
+            self.show_notification(
+                "Automatic typing enabled",
+                "Dictated text will now be typed into the active app.",
+            )
+        else:
+            # Consent stays unset so the user can retry from the tray menu.
+            self.show_notification(
+                "Automatic typing not enabled",
+                "Transcripts are copied to the clipboard. You can enable "
+                "automatic typing later from the tray menu.",
+            )
+
+    def _refresh_autopaste_action(self):
+        """Keep the auto-typing row visible whenever the platform supports it,
+        with the label carrying the state. A permanent status row is
+        discoverable after a revocation; an item that appears and disappears
+        reads as the feature being gone entirely."""
+        consent = self.autopaste_consent
+        if not consent:
+            return
+        self.autopaste_action.setVisible(consent.supported)
+        # "off" whenever it can be (re-)enabled: not granted, or granted but
+        # broken (revoked / restore failed).
+        if consent.can_offer() or self._autopaste_broken:
+            self.autopaste_action.setText("Automatic typing: off - click to enable...")
+            self.autopaste_action.setEnabled(True)
+        else:
+            self.autopaste_action.setText("Automatic typing: on")
+            self.autopaste_action.setEnabled(False)
+
+    def _emit_autopaste_revoked(self):
+        """Bridge the adapter's D-Bus-thread revocation callback to the GUI."""
+        self.autopaste_revoked.emit()
+
+    def _on_autopaste_revoked(self):
+        """GUI-thread handler: automatic typing was lost mid-session."""
+        self._autopaste_broken = True  # granted-then-broken -> degraded
+        self._refresh_autopaste_action()
+        self.refresh_health()
+        self.show_notification(
+            "Automatic typing turned off",
+            "Transcripts are copied to the clipboard. You can re-enable "
+            "automatic typing from the tray menu.",
+        )
 
     def change_audio_device(self, device_index: Optional[int]):
         # Update checkmarks
@@ -810,6 +951,9 @@ class SystemTrayApp(QSystemTrayIcon):
                     self.ptt_action.setText(f"Push-to-Talk (Hold {ptt_key})")
                 else:
                     self.ptt_action.setText(f"Toggle Dictation (Press {ptt_key})")
+            # A rebind updates hotkey_manager.status; re-render health so a
+            # failed rebind (unusable adapter) shows the degraded icon.
+            self.refresh_health()
 
         # Check which settings actually need restart
         if "audio.sample_rate" in settings:
@@ -906,6 +1050,31 @@ class SystemTrayApp(QSystemTrayIcon):
         self.output_manager = output_manager
         self.config_manager = config_manager
 
+        # Automatic typing consent (Wayland only). The tray row is permanent
+        # wherever the feature is available; its label carries the on/off state.
+        supported = bool(output_manager and output_manager.autopaste_supported())
+        self.autopaste_consent = AutopasteConsent(config_manager, supported=supported)
+        # Startup token-restore failure while consent says granted: the adapter
+        # reports a non-usable output status -> treat as granted-then-broken.
+        if (
+            self.autopaste_consent.is_granted()
+            and output_manager is not None
+            and getattr(output_manager, "status", None) is not None
+            and not output_manager.status.usable
+        ):
+            self._autopaste_broken = True
+        self._refresh_autopaste_action()
+        try:
+            self.autopaste_result.connect(self._on_autopaste_result)
+            self.autopaste_revoked.connect(self._on_autopaste_revoked)
+            # Re-evaluate the offer's visibility every time the menu opens so it
+            # reflects the current granted-state, not just the state at startup.
+            self.menu.aboutToShow.connect(self._refresh_autopaste_action)
+        except Exception:
+            pass
+        if output_manager:
+            output_manager.set_autopaste_revoked_callback(self._emit_autopaste_revoked)
+
         # Update PTT action text with actual configured hotkey
         if self.config_manager:
             ptt_key = self.config_manager.get("hotkeys.push_to_talk", "F9").upper()
@@ -920,3 +1089,7 @@ class SystemTrayApp(QSystemTrayIcon):
         # Update model menu now that we have config_manager - this ensures
         # the correct model is checked after restarts/upgrades
         self.update_model_menu_selection()
+
+        # Render the icon for the current platform health now that components
+        # (hotkey/output managers) are wired.
+        self.refresh_health()

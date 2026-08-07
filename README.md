@@ -28,6 +28,26 @@ Built to solve real GPU acceleration issues with whisper.cpp. WhisperX provides:
 - Better accuracy with less latency
 - Native Python integration that actually works
 
+## Platform support
+
+Witticism works out of the box, with full hold-to-talk (hold the hotkey to record, release to stop), on:
+
+- **Windows**
+- **Linux X11**
+- **Linux Wayland with the GlobalShortcuts portal** - KDE Plasma and GNOME 48+
+
+On **GNOME 46 / 47 Wayland**, which do not yet expose that portal, Witticism still works out of the box with **hold-to-talk**: hold the hotkey to record, release to stop. It does this by registering a standard GNOME custom keyboard shortcut (the same kind you can create in Settings > Keyboard > Custom Shortcuts) - no install, no logout, and you can see and edit it there; it is removed when Witticism exits - and inferring the key release from GNOME's key-repeat stream. (If you have key auto-repeat turned off, the same hotkey works in press-to-toggle mode instead: press once to start, again to stop.) For exact, repeat-independent release timing you can optionally install a small GNOME Shell extension:
+
+```bash
+witticism-platform install-gnome-extension
+```
+
+This step is entirely opt-in, prompts for confirmation, and requires you to **log out and back in** before it takes effect. The installer never deploys it for you.
+
+On Wayland, transcribed text is **copied to your clipboard by default** - just paste it (Ctrl+V, or Ctrl+Shift+V in a terminal). There are **no permission dialogs** at startup. If you'd like Witticism to insert text for you automatically, you can optionally enable **automatic typing** from the tray menu; it types the transcript into the active app (so it works everywhere, including terminals). It uses a one-time GNOME permission (a system dialog titled "Remote Desktop", covering keyboard input only) and Witticism explains what to expect before it appears. You can turn it off again at any time.
+
+Run `witticism-platform doctor` at any time to see which backends are active and how to improve them. See [docs/platform-adapters.md](docs/platform-adapters.md) for the full support matrix.
+
 ## Installation
 
 ### 🚀 Quick Install
@@ -64,6 +84,7 @@ If you prefer to install manually:
 ### Prerequisites
 
 - **Linux** (Ubuntu, Fedora, Debian, etc.)
+- **Linux display integration**: X11, Wayland with the GlobalShortcuts portal (KDE, GNOME 48+), or GNOME 46/47 Wayland (hold-to-talk out of the box via a standard GNOME custom keyboard shortcut with key-repeat release inference; optional extension for exact release timing). See [Platform support](#platform-support).
 - **Python 3.10-3.12** (pipx will handle this)
 - **NVIDIA GPU** (optional but recommended for faster transcription)
 

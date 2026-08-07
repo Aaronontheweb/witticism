@@ -1,57 +1,68 @@
 import logging
 import threading
-from pynput import keyboard
-from typing import Optional, Callable
+import time
+from typing import Callable, Optional
+
+from witticism.platform.input_output import (
+    ShortcutBinding,
+    ShortcutEvent,
+    ShortcutEventType,
+    ShortcutTrigger,
+    create_shortcut_adapter,
+)
 
 logger = logging.getLogger(__name__)
-
-# Default debounce delay in seconds (30ms as suggested in #95)
 DEFAULT_PTT_DEBOUNCE_MS = 30
+# Minimum debounce for press-to-toggle backends (no key-release signal). Must be
+# well above keyboard auto-repeat (~33ms) so a held key cannot flutter state.
+PRESS_TO_TOGGLE_DEBOUNCE_MS = 250
 
 
 class HotkeyManager:
-    def __init__(self, config_manager=None):
+    """Platform-neutral hotkey state machine."""
+
+    def __init__(self, config_manager=None, adapter=None):
+        self.config_manager = config_manager
+        self.adapter = adapter or create_shortcut_adapter()
         self.listener = None
-        self.hotkeys = {}
-        self.current_keys = set()
-
-        # Callbacks
-        self.on_push_to_talk_start = None
-        self.on_push_to_talk_stop = None
-        self.on_toggle = None
-        self.on_toggle_dictation = None
-
-        # PTT state - read from config or default to F9
-        self.ptt_key = keyboard.Key.f9  # default fallback
-        if config_manager:
-            ptt_key_str = config_manager.get("hotkeys.push_to_talk", "f9")
-            if self.update_hotkey_from_string(ptt_key_str):
-                logger.info(f"[HOTKEY_MANAGER] CONFIG_PTT_KEY: using configured PTT key '{ptt_key_str}'")
-            else:
-                logger.warning(f"[HOTKEY_MANAGER] INVALID_PTT_KEY: invalid PTT key '{ptt_key_str}' in config, using default F9")
-
+        self.on_push_to_talk_start: Optional[Callable] = None
+        self.on_push_to_talk_stop: Optional[Callable] = None
+        self.on_toggle: Optional[Callable] = None
+        self.on_toggle_dictation: Optional[Callable] = None
+        self.ptt_key = self._configured("hotkeys.push_to_talk", "f9")
+        self.mode_switch_key = self._configured("hotkeys.mode_switch", "Ctrl+Alt+M")
         self.ptt_active = False
-
-        # Mode state
-        self.mode = "push_to_talk"  # "push_to_talk" or "toggle"
+        self.mode = "push_to_talk"
         self.dictation_active = False
-
-        # Debounce support (#95) - helps with mouse buttons that send rapid key up/down events
-        self.ptt_debounce_ms = DEFAULT_PTT_DEBOUNCE_MS
-        if config_manager:
-            self.ptt_debounce_ms = config_manager.get("hotkeys.ptt_debounce_ms", DEFAULT_PTT_DEBOUNCE_MS)
+        self.ptt_debounce_ms = int(self._configured("hotkeys.ptt_debounce_ms", DEFAULT_PTT_DEBOUNCE_MS))
         self._ptt_stop_timer: Optional[threading.Timer] = None
         self._ptt_timer_lock = threading.Lock()
+        self._last_toggle_press = 0.0
+        # Backends that cannot observe key-release (e.g. a GNOME custom
+        # keyboard shortcut) advertise supports_hold=False; the manager then
+        # turns push-to-talk into press-to-toggle. Unknown adapters default True.
+        self.supports_hold = bool(getattr(self.adapter, "supports_hold", True))
+        self.status = self.adapter.probe()
+        logger.info(
+            "[HOTKEY_MANAGER] INIT: mode=%s, ptt_key=%s, debounce=%sms, backend=%s, supports_hold=%s",
+            self.mode, self.ptt_key, self.ptt_debounce_ms, self.status.backend, self.supports_hold,
+        )
 
-        ptt_key_name = getattr(self.ptt_key, 'name', str(self.ptt_key))
-        logger.info(f"[HOTKEY_MANAGER] INIT: mode={self.mode}, ptt_key={ptt_key_name}, debounce={self.ptt_debounce_ms}ms")
+    def _configured(self, key, default):
+        return self.config_manager.get(key, default) if self.config_manager else default
+
+    def _bindings(self):
+        return [
+            ShortcutBinding("push_to_talk", self.ptt_key, ShortcutTrigger.HOLD),
+            ShortcutBinding("mode_switch", self.mode_switch_key, ShortcutTrigger.ACTIVATE),
+        ]
 
     def set_callbacks(
         self,
-        on_push_to_talk_start: Optional[Callable] = None,
-        on_push_to_talk_stop: Optional[Callable] = None,
-        on_toggle: Optional[Callable] = None,
-        on_toggle_dictation: Optional[Callable] = None
+        on_push_to_talk_start=None,
+        on_push_to_talk_stop=None,
+        on_toggle=None,
+        on_toggle_dictation=None,
     ):
         self.on_push_to_talk_start = on_push_to_talk_start
         self.on_push_to_talk_stop = on_push_to_talk_stop
@@ -60,206 +71,153 @@ class HotkeyManager:
 
     def start(self):
         if self.listener:
-            logger.warning("[HOTKEY_MANAGER] ALREADY_STARTED: HotkeyManager already started")
+            logger.warning("[HOTKEY_MANAGER] ALREADY_STARTED")
             return
-
-        # Create listener for push-to-talk
-        self.listener = keyboard.Listener(
-            on_press=self._on_key_press,
-            on_release=self._on_key_release
+        self.status = self.adapter.start(self._bindings(), self._on_shortcut_event)
+        self.listener = self.adapter
+        log = logger.info if self.status.usable else logger.error
+        log(
+            "[HOTKEY_MANAGER] %s: backend=%s, state=%s, guidance=%s",
+            "STARTED" if self.status.usable else "UNAVAILABLE",
+            self.status.backend,
+            self.status.state.value,
+            self.status.recovery_action or "none",
         )
-        self.listener.start()
-
-        logger.info("[HOTKEY_MANAGER] STARTED: keyboard listener active")
 
     def stop(self):
-        # Cancel any pending debounce timer
         self._cancel_ptt_stop_timer()
+        if self.ptt_active:
+            self._do_ptt_stop()
+        self.adapter.stop()
+        self.listener = None
+        logger.info("[HOTKEY_MANAGER] STOPPED")
 
-        if self.listener:
-            self.listener.stop()
-            self.listener = None
-            logger.info("[HOTKEY_MANAGER] STOPPED: keyboard listener deactivated")
-
-    def _on_key_press(self, key):
+    def _on_shortcut_event(self, event: ShortcutEvent):
         try:
-            # Handle F9 based on mode
-            if key == self.ptt_key:
-                if self.mode == "push_to_talk":
-                    # Cancel any pending stop timer (#95 debounce)
-                    self._cancel_ptt_stop_timer()
-
-                    # Push-to-talk mode
-                    if not self.ptt_active:
-                        self.ptt_active = True
-                        ptt_key_name = getattr(self.ptt_key, 'name', str(self.ptt_key))
-                        logger.debug(f"[HOTKEY_MANAGER] PTT_START: {ptt_key_name} pressed - recording started")
-                        if self.on_push_to_talk_start:
-                            self.on_push_to_talk_start()
-                elif self.mode == "toggle":
-                    # Toggle mode - F9 toggles dictation on/off
-                    # We'll handle this on key release to avoid repeated toggles
-                    pass
-
-            # Track current keys for combinations
-            self.current_keys.add(key)
-
-            # Check for mode switch combination (Ctrl+Alt+M)
-            if self._is_combo_pressed(
-                keyboard.Key.ctrl_l,
-                keyboard.Key.alt_l,
-                keyboard.KeyCode.from_char('m')
-            ):
-                logger.debug("[HOTKEY_MANAGER] MODE_TOGGLE_COMBO: Ctrl+Alt+M pressed")
+            if event.id == "mode_switch" and event.type == ShortcutEventType.ACTIVATED:
                 if self.on_toggle:
                     self.on_toggle()
+                return
+            if event.id != "push_to_talk":
+                return
+            if event.type == ShortcutEventType.ACTIVATED:
+                if not self.supports_hold:
+                    # Press-only backend: the ACTIVATED press is the only signal
+                    # we ever get, so drive both modes from it. push_to_talk
+                    # alternates start/stop; toggle flips continuous dictation.
+                    if self.mode == "push_to_talk":
+                        self._toggle_ptt_press()
+                    elif self.mode == "toggle":
+                        self._toggle_dictation_press()
+                    return
+                if self.mode != "push_to_talk":
+                    return
+                self._cancel_ptt_stop_timer()
+                if not self.ptt_active:
+                    self.ptt_active = True
+                    if self.on_push_to_talk_start:
+                        self.on_push_to_talk_start()
+                return
+            if event.type != ShortcutEventType.DEACTIVATED:
+                return
+            if not self.supports_hold:
+                # Press-to-toggle backends never emit release events; ignore any.
+                return
+            if self.mode == "push_to_talk" and self.ptt_active:
+                self._schedule_ptt_stop() if self.ptt_debounce_ms > 0 else self._do_ptt_stop()
+            elif self.mode == "toggle":
+                self.dictation_active = not self.dictation_active
+                if self.on_toggle_dictation:
+                    self.on_toggle_dictation(self.dictation_active)
+        except Exception:
+            logger.exception("[HOTKEY_MANAGER] SHORTCUT_EVENT_ERROR")
 
-        except Exception as e:
-            logger.error(f"[HOTKEY_MANAGER] KEY_PRESS_ERROR: error in key press handler - {e}")
+    def _press_to_toggle_debounce_ms(self):
+        # Press-to-toggle needs a much larger guard than hold-to-talk's release
+        # debounce: keyboard auto-repeat fires roughly every ~33ms, so the 30ms
+        # default would let repeats flutter the recording state. No human
+        # intentionally toggles twice within a quarter second.
+        return max(self.ptt_debounce_ms, PRESS_TO_TOGGLE_DEBOUNCE_MS)
 
-    def _on_key_release(self, key):
-        try:
-            # Handle F9 based on mode
-            if key == self.ptt_key:
-                if self.mode == "push_to_talk":
-                    # Push-to-talk mode - stop recording on release (with debounce)
-                    if self.ptt_active:
-                        ptt_key_name = getattr(self.ptt_key, 'name', str(self.ptt_key))
-                        if self.ptt_debounce_ms > 0:
-                            # Use debounce timer (#95) - helps with mouse buttons sending rapid events
-                            logger.debug(f"[HOTKEY_MANAGER] PTT_RELEASE: {ptt_key_name} released - scheduling stop with {self.ptt_debounce_ms}ms debounce")
-                            self._schedule_ptt_stop()
-                        else:
-                            # No debounce - immediate stop
-                            self._do_ptt_stop()
-                elif self.mode == "toggle":
-                    # Toggle mode - toggle dictation state
-                    self.dictation_active = not self.dictation_active
-                    ptt_key_name = getattr(self.ptt_key, 'name', str(self.ptt_key))
-                    logger.debug(f"[HOTKEY_MANAGER] TOGGLE_DICTATION: {ptt_key_name} pressed - dictation {'enabled' if self.dictation_active else 'disabled'}")
-                    if self.on_toggle_dictation:
-                        self.on_toggle_dictation(self.dictation_active)
+    def _toggle_debounced(self):
+        """Return True if this press should act, updating the debounce clock."""
+        now = time.monotonic()
+        if (now - self._last_toggle_press) * 1000 < self._press_to_toggle_debounce_ms():
+            return False
+        self._last_toggle_press = now
+        return True
 
-            # Remove from current keys
-            self.current_keys.discard(key)
+    def _toggle_ptt_press(self):
+        if not self._toggle_debounced():
+            return
+        if not self.ptt_active:
+            self.ptt_active = True
+            if self.on_push_to_talk_start:
+                self.on_push_to_talk_start()
+        else:
+            self.ptt_active = False
+            if self.on_push_to_talk_stop:
+                self.on_push_to_talk_stop()
 
-        except Exception as e:
-            logger.error(f"[HOTKEY_MANAGER] KEY_RELEASE_ERROR: error in key release handler - {e}")
+    def _toggle_dictation_press(self):
+        # Toggle (continuous dictation) mode on a press-only backend: each press
+        # flips dictation on/off, mirroring the DEACTIVATED path used by
+        # hold-capable backends.
+        if not self._toggle_debounced():
+            return
+        self.dictation_active = not self.dictation_active
+        if self.on_toggle_dictation:
+            self.on_toggle_dictation(self.dictation_active)
 
     def _schedule_ptt_stop(self):
-        """Schedule a debounced PTT stop (#95)."""
         with self._ptt_timer_lock:
-            # Cancel any existing timer
             if self._ptt_stop_timer is not None:
                 self._ptt_stop_timer.cancel()
-
-            # Schedule new timer
-            delay_seconds = self.ptt_debounce_ms / 1000.0
-            self._ptt_stop_timer = threading.Timer(delay_seconds, self._do_ptt_stop)
+            self._ptt_stop_timer = threading.Timer(self.ptt_debounce_ms / 1000.0, self._do_ptt_stop)
             self._ptt_stop_timer.daemon = True
             self._ptt_stop_timer.start()
 
     def _cancel_ptt_stop_timer(self):
-        """Cancel any pending PTT stop timer (#95)."""
         with self._ptt_timer_lock:
             if self._ptt_stop_timer is not None:
                 self._ptt_stop_timer.cancel()
                 self._ptt_stop_timer = None
-                logger.debug("[HOTKEY_MANAGER] PTT_DEBOUNCE: cancelled pending stop - key pressed again")
 
     def _do_ptt_stop(self):
-        """Actually perform the PTT stop."""
         with self._ptt_timer_lock:
             self._ptt_stop_timer = None
-
         if self.ptt_active:
             self.ptt_active = False
-            ptt_key_name = getattr(self.ptt_key, 'name', str(self.ptt_key))
-            logger.debug(f"[HOTKEY_MANAGER] PTT_STOP: {ptt_key_name} - recording stopped")
             if self.on_push_to_talk_stop:
                 self.on_push_to_talk_stop()
 
-    def _is_combo_pressed(self, *keys):
-        for key in keys:
-            # Check both left and right variants for modifiers
-            if isinstance(key, keyboard.Key):
-                if key in [keyboard.Key.ctrl, keyboard.Key.ctrl_l, keyboard.Key.ctrl_r]:
-                    if not any(k in self.current_keys for k in
-                              [keyboard.Key.ctrl, keyboard.Key.ctrl_l, keyboard.Key.ctrl_r]):
-                        return False
-                elif key in [keyboard.Key.alt, keyboard.Key.alt_l, keyboard.Key.alt_r]:
-                    if not any(k in self.current_keys for k in
-                              [keyboard.Key.alt, keyboard.Key.alt_l, keyboard.Key.alt_r]):
-                        return False
-                elif key not in self.current_keys:
-                    return False
-            elif key not in self.current_keys:
-                return False
+    def update_hotkey_from_string(self, key_string: str, hotkey_type: str = "ptt"):
+        if hotkey_type != "ptt" or not self._valid_ptt_key(key_string):
+            return False
+        old = self.ptt_key
+        self.ptt_key = key_string
+        if self.listener:
+            self.status = self.adapter.update_bindings(self._bindings())
+        logger.info("[HOTKEY_MANAGER] PTT_KEY_CHANGED: from %s to %s", old, key_string)
         return True
 
+    @staticmethod
+    def _valid_ptt_key(key_string):
+        if not isinstance(key_string, str) or not key_string:
+            return False
+        upper = key_string.upper()
+        return upper in {f"F{i}" for i in range(1, 13)} | {"SPACE", "TAB", "ENTER", "ESC"} or len(key_string) == 1
+
     def change_ptt_key(self, key):
-        old_key_name = getattr(self.ptt_key, 'name', str(self.ptt_key))
-        new_key_name = getattr(key, 'name', str(key))
-        self.ptt_key = key
-        logger.info(f"[HOTKEY_MANAGER] PTT_KEY_CHANGED: from {old_key_name} to {new_key_name}")
-
-    def update_hotkey_from_string(self, key_string: str, hotkey_type: str = "ptt"):
-        """Update hotkey from a Qt-style key string (e.g., 'F9', 'Ctrl+Alt+M')"""
-        if hotkey_type == "ptt":
-            # Map common keys
-            key_map = {
-                "F1": keyboard.Key.f1, "F2": keyboard.Key.f2, "F3": keyboard.Key.f3,
-                "F4": keyboard.Key.f4, "F5": keyboard.Key.f5, "F6": keyboard.Key.f6,
-                "F7": keyboard.Key.f7, "F8": keyboard.Key.f8, "F9": keyboard.Key.f9,
-                "F10": keyboard.Key.f10, "F11": keyboard.Key.f11, "F12": keyboard.Key.f12,
-                "Space": keyboard.Key.space, "Tab": keyboard.Key.tab,
-                "Enter": keyboard.Key.enter, "Esc": keyboard.Key.esc,
-            }
-
-            key_upper = key_string.upper()
-            if key_upper in key_map:
-                self.change_ptt_key(key_map[key_upper])
-                return True
-
-            # Handle single character keys
-            if len(key_string) == 1:
-                self.change_ptt_key(keyboard.KeyCode.from_char(key_string.lower()))
-                return True
-
-        return False
+        return self.update_hotkey_from_string(str(getattr(key, "name", key)))
 
     def set_mode(self, mode: str):
-        """Set the hotkey mode: 'push_to_talk' or 'toggle'"""
-        if mode not in ["push_to_talk", "toggle"]:
+        if mode not in ("push_to_talk", "toggle"):
             raise ValueError(f"Invalid mode: {mode}")
-
-        # If switching from toggle mode while dictation is active, stop it
         if self.mode == "toggle" and mode == "push_to_talk" and self.dictation_active:
-            logger.info("[HOTKEY_MANAGER] DICTATION_STOP: switching from toggle to push-to-talk mode")
             self.dictation_active = False
             if self.on_toggle_dictation:
                 self.on_toggle_dictation(False)
-
-        old_mode = self.mode
+        old = self.mode
         self.mode = mode
-        logger.info(f"[HOTKEY_MANAGER] MODE_CHANGED: from {old_mode} to {mode}")
-
-
-class GlobalHotkeyManager(HotkeyManager):
-    def __init__(self, config_manager=None):
-        super().__init__(config_manager)
-        self.global_hotkeys = {}
-
-    def register_global_hotkey(self, hotkey_str: str, callback: Callable):
-        # Parse hotkey string like "<ctrl>+<alt>+m"
-        self.global_hotkeys[hotkey_str] = callback
-        logger.info(f"[HOTKEY_MANAGER] GLOBAL_HOTKEY_REGISTERED: {hotkey_str}")
-
-    def start(self):
-        if self.global_hotkeys:
-            # Use GlobalHotKeys for registered combinations
-            self.global_listener = keyboard.GlobalHotKeys(self.global_hotkeys)
-            self.global_listener.start()
-
-        # Also start regular listener for PTT
-        super().start()
+        logger.info("[HOTKEY_MANAGER] MODE_CHANGED: from %s to %s", old, mode)

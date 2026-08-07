@@ -343,7 +343,8 @@ class WitticismApp:
             output_mode = self.config_manager.get("output.mode", "type")
             logger.info(f"[WITTICISM] OUTPUT_INIT: mode={output_mode}")
             self.output_manager = OutputManager(
-                output_mode=output_mode
+                output_mode=output_mode,
+                config_manager=self.config_manager
             )
 
             # Initialize hotkey manager
@@ -376,6 +377,27 @@ class WitticismApp:
 
         # Start hotkey manager
         self.hotkey_manager.start()
+        status = self.hotkey_manager.status
+        # The hotkey status is final only after start(); refresh the tray icon so
+        # an unusable adapter shows the degraded health indicator immediately.
+        if self.tray_app and hasattr(self.tray_app, "refresh_health"):
+            self.tray_app.refresh_health()
+        if self.tray_app and not status.usable:
+            guidance = f"\n\n{status.recovery_action}" if status.recovery_action else ""
+            self.tray_app.showMessage(
+                "Witticism Platform Integration",
+                f"Push-to-talk is unavailable: {status.message or status.state.value}{guidance}",
+            )
+        elif self.tray_app and not self.hotkey_manager.supports_hold:
+            # Working, but this backend only supports press-to-toggle (no
+            # hold-to-talk). Keep the message informative, not alarming.
+            guidance = f"\n\n{status.recovery_action}" if status.recovery_action else ""
+            ptt_key = str(self.hotkey_manager.ptt_key).upper()
+            self.tray_app.showMessage(
+                "Witticism Hotkeys",
+                f"Hold-to-talk isn't available in this session. Press {ptt_key} once to "
+                f"start recording and again to stop.{guidance}",
+            )
 
     def _force_cpu_mode_and_retry(self):
         """Force CPU mode and retry initialization after CUDA failure"""
