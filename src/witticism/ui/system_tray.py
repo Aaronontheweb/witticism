@@ -65,6 +65,7 @@ class SystemTrayApp(QSystemTrayIcon):
     # emit stays a direct call).
     ptt_start_requested = pyqtSignal()
     ptt_stop_requested = pyqtSignal()
+    ptt_cancel_requested = pyqtSignal()
     toggle_enabled_requested = pyqtSignal()
     toggle_dictation_requested = pyqtSignal(bool)
 
@@ -490,6 +491,17 @@ class SystemTrayApp(QSystemTrayIcon):
             else:
                 self.set_status("Ready")
 
+    def abort_recording(self):
+        """Stop an in-flight push-to-talk capture and DISCARD its audio without
+        transcribing. Used when a mode switch cancels the capture, so a partial
+        utterance is never injected into the focused window."""
+        if not self.is_recording:
+            return
+        self.is_recording = False
+        if self.audio_capture:
+            self.audio_capture.stop_push_to_talk()  # drop the returned buffer
+        self.set_status("Ready")
+
     def process_transcription(self, audio_data):
         if not self.engine:
             self.set_status("Engine not initialized")
@@ -704,6 +716,15 @@ class SystemTrayApp(QSystemTrayIcon):
             self.loading_progress_action.setVisible(False)
             self.cancel_loading_action.setVisible(False)
 
+    def _ptt_key_label(self):
+        """Upper-cased push-to-talk key for display, tolerating a non-string or
+        empty configured value (from a hand-edited or partially-migrated config)
+        so building a menu label never raises."""
+        key = self.config_manager.get("hotkeys.push_to_talk", "F9") if self.config_manager else "F9"
+        if not isinstance(key, str) or not key.strip():
+            key = "F9"
+        return key.upper()
+
     def change_mode(self, mode: str):
         """Switch between push-to-talk and toggle modes"""
         self.mode = mode
@@ -720,9 +741,7 @@ class SystemTrayApp(QSystemTrayIcon):
             self.hotkey_manager.set_mode(mode)
 
         # Update PTT action text
-        ptt_key = "F9"  # Default
-        if self.config_manager:
-            ptt_key = self.config_manager.get("hotkeys.push_to_talk", "F9").upper()
+        ptt_key = self._ptt_key_label()
 
         if mode == "push_to_talk":
             self.ptt_action.setText(f"Push-to-Talk (Hold {ptt_key})")
@@ -733,12 +752,13 @@ class SystemTrayApp(QSystemTrayIcon):
         if mode == "push_to_talk" and self.is_dictating:
             self.stop_dictation()
 
-        # Switching away from push-to-talk with a capture in flight must stop
-        # the mic. When a hotkey manager is present, set_mode() above already did
-        # this synchronously via its stop callback; this is only the fallback for
-        # the no-hotkey-manager case, so the stop is issued in exactly one place.
+        # Switching away from push-to-talk with a capture in flight cancels it
+        # (drops the partial audio; a mode switch is not a finished utterance).
+        # When a hotkey manager is present, set_mode() above already did this
+        # synchronously via its cancel callback; this is only the fallback for
+        # the no-hotkey-manager case, so the abort is issued in exactly one place.
         if mode == "toggle" and self.is_recording and self.hotkey_manager is None:
-            self.stop_recording()
+            self.abort_recording()
 
         logger.info(f"Mode changed to: {mode}")
 
@@ -854,6 +874,9 @@ class SystemTrayApp(QSystemTrayIcon):
 
     def request_ptt_stop(self):
         self.ptt_stop_requested.emit()
+
+    def request_ptt_cancel(self):
+        self.ptt_cancel_requested.emit()
 
     def request_toggle_enabled(self):
         self.toggle_enabled_requested.emit()
@@ -1100,6 +1123,7 @@ class SystemTrayApp(QSystemTrayIcon):
             # Marshal hotkey events onto the GUI thread before they touch widgets.
             self.ptt_start_requested.connect(self.start_recording)
             self.ptt_stop_requested.connect(self.stop_recording)
+            self.ptt_cancel_requested.connect(self.abort_recording)
             self.toggle_enabled_requested.connect(self.toggle_enabled)
             self.toggle_dictation_requested.connect(self.toggle_dictation)
             # Re-evaluate the offer's visibility every time the menu opens so it
@@ -1112,7 +1136,7 @@ class SystemTrayApp(QSystemTrayIcon):
 
         # Update PTT action text with actual configured hotkey
         if self.config_manager:
-            ptt_key = self.config_manager.get("hotkeys.push_to_talk", "F9").upper()
+            ptt_key = self._ptt_key_label()
             if self.mode == "push_to_talk":
                 self.ptt_action.setText(f"Push-to-Talk (Hold {ptt_key})")
             else:

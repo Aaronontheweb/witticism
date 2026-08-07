@@ -366,7 +366,8 @@ class WitticismApp:
             on_push_to_talk_start=self.tray_app.request_ptt_start,
             on_push_to_talk_stop=self.tray_app.request_ptt_stop,
             on_toggle=self.tray_app.request_toggle_enabled,
-            on_toggle_dictation=self.tray_app.request_toggle_dictation
+            on_toggle_dictation=self.tray_app.request_toggle_dictation,
+            on_push_to_talk_cancel=self.tray_app.request_ptt_cancel
         )
 
         # Pass components to tray app

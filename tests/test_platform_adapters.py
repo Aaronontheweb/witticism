@@ -1441,3 +1441,64 @@ def test_ptt_transition_callbacks_fire_once_under_lock():
     assert manager._end_ptt() is True
     assert manager._end_ptt() is False     # already stopped: no duplicate stop
     assert events == ["start", "stop"]
+
+
+def test_set_mode_does_not_arm_swallow_after_release_debounce():
+    """If the PTT key was already released (a debounce stop is pending) when the
+    user switches to toggle, no trailing release is coming, so the swallow must
+    NOT be armed - otherwise the first real toggle press would be eaten."""
+    adapter = FakeShortcutAdapter()  # supports_hold True
+    manager = HotkeyManager(DebounceConfig(1000), adapter=adapter)
+    flips = []
+    manager.set_callbacks(on_toggle_dictation=lambda active: flips.append(active))
+    manager.start()
+    adapter.emit("push_to_talk", ShortcutEventType.ACTIVATED)    # hold begins
+    adapter.emit("push_to_talk", ShortcutEventType.DEACTIVATED)  # release -> debounce stop scheduled
+    assert manager.ptt_active is True                            # still within debounce window
+    manager.set_mode("toggle")                                  # release already seen
+    assert manager._pending_ptt_release is False
+    adapter.emit("push_to_talk", ShortcutEventType.ACTIVATED)
+    adapter.emit("push_to_talk", ShortcutEventType.DEACTIVATED)
+    assert flips == [True]                                       # first toggle NOT swallowed
+
+
+def test_switch_out_and_back_does_not_strand_swallow():
+    """Switching PTT->toggle mid-hold then back to PTT must clear the swallow, so
+    a later genuine release is never eaten (which would leave the mic stuck)."""
+    adapter = FakeShortcutAdapter()  # supports_hold True
+    manager = HotkeyManager(FakeConfig(), adapter=adapter)  # debounce 1ms
+    events = []
+    manager.set_callbacks(
+        on_push_to_talk_start=lambda: events.append("start"),
+        on_push_to_talk_stop=lambda: events.append("stop"),
+    )
+    manager.start()
+    adapter.emit("push_to_talk", ShortcutEventType.ACTIVATED)   # hold begins (key still down)
+    manager.set_mode("toggle")
+    assert manager._pending_ptt_release is True                 # armed (key was held)
+    manager.set_mode("push_to_talk")
+    assert manager._pending_ptt_release is False                # cleared on switch back
+    events.clear()
+    adapter.emit("push_to_talk", ShortcutEventType.ACTIVATED)
+    adapter.emit("push_to_talk", ShortcutEventType.DEACTIVATED)
+    time.sleep(0.02)                                            # let the 1ms debounce stop fire
+    assert manager.ptt_active is False                          # not stuck recording
+    assert events == ["start", "stop"]
+
+
+def test_set_mode_cancels_not_stops_when_cancel_wired():
+    """With a cancel handler wired, leaving PTT mid-capture fires cancel
+    (discard), never stop (which would transcribe the partial)."""
+    adapter = FakeNoHoldAdapter()
+    manager = HotkeyManager(FakeConfig(), adapter=adapter)
+    events = []
+    manager.set_callbacks(
+        on_push_to_talk_start=lambda: events.append("start"),
+        on_push_to_talk_stop=lambda: events.append("stop"),
+        on_push_to_talk_cancel=lambda: events.append("cancel"),
+    )
+    manager.start()
+    adapter.emit("push_to_talk", ShortcutEventType.ACTIVATED)  # recording
+    manager.set_mode("toggle")
+    assert events == ["start", "cancel"]
+    assert manager.ptt_active is False

@@ -115,5 +115,38 @@ def test_set_components_wires_hotkey_signals_to_handlers(app):
     assert audio.stopped is True
 
 
+def test_change_mode_tolerates_non_string_ptt_key(app):
+    """A non-string hotkeys.push_to_talk (hand-edited/corrupt config) must not
+    crash the mode switch on .upper()."""
+    class _Cfg:
+        def get(self, key, default=None):
+            if key == "hotkeys.push_to_talk":
+                return None
+            return default
+
+    tray = SystemTrayApp()
+    tray.config_manager = _Cfg()
+    tray.hotkey_manager = None
+    tray.change_mode("toggle")        # must not raise AttributeError
+    tray.change_mode("push_to_talk")
+    assert tray._ptt_key_label() == "F9"
+
+
+def test_abort_recording_discards_without_transcribing(app):
+    """abort_recording stops the mic and drops the buffer; it never transcribes."""
+    tray = SystemTrayApp()
+    tray.is_enabled = True
+    audio = _AudioStub()
+    tray.audio_capture = audio
+    transcribed = []
+    tray.process_transcription = lambda data: transcribed.append(data)
+    tray.start_recording()
+    assert tray.is_recording is True
+    tray.abort_recording()
+    assert tray.is_recording is False
+    assert audio.stopped is True
+    assert transcribed == []  # partial capture discarded, not injected
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))

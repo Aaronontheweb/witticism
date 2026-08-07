@@ -28,6 +28,10 @@ class HotkeyManager:
         self.listener = None
         self.on_push_to_talk_start: Optional[Callable] = None
         self.on_push_to_talk_stop: Optional[Callable] = None
+        # Fired when an in-flight capture is abandoned (not finished) - currently
+        # when a mode switch cancels it. Listeners should drop the audio without
+        # transcribing, distinct from on_push_to_talk_stop which commits it.
+        self.on_push_to_talk_cancel: Optional[Callable] = None
         self.on_toggle: Optional[Callable] = None
         self.on_toggle_dictation: Optional[Callable] = None
         self.ptt_key = self._accel_or_default(self._configured("hotkeys.push_to_talk", "f9"), "f9")
@@ -73,11 +77,13 @@ class HotkeyManager:
         on_push_to_talk_stop=None,
         on_toggle=None,
         on_toggle_dictation=None,
+        on_push_to_talk_cancel=None,
     ):
         self.on_push_to_talk_start = on_push_to_talk_start
         self.on_push_to_talk_stop = on_push_to_talk_stop
         self.on_toggle = on_toggle
         self.on_toggle_dictation = on_toggle_dictation
+        self.on_push_to_talk_cancel = on_push_to_talk_cancel
 
     def start(self):
         if self.listener:
@@ -127,18 +133,22 @@ class HotkeyManager:
                 return
             if event.type != ShortcutEventType.DEACTIVATED:
                 return
-            if self._pending_ptt_release:
-                # A leftover physical key-release from a capture we already
-                # stopped on a mode switch (the key was still held). Consume it
-                # so it does not fall through and flip dictation on.
-                self._pending_ptt_release = False
-                return
             if not self.supports_hold:
                 # Press-to-toggle backends never emit release events; ignore any.
                 return
-            if self.mode == "push_to_talk" and self.ptt_active:
-                self._schedule_ptt_stop() if self.ptt_debounce_ms > 0 else self._do_ptt_stop()
+            if self.mode == "push_to_talk":
+                # A real release always ends the capture. The stray-release guard
+                # is intentionally NOT applied here: swallowing a release in
+                # push-to-talk mode could leave the mic stuck recording.
+                if self.ptt_active:
+                    self._schedule_ptt_stop() if self.ptt_debounce_ms > 0 else self._do_ptt_stop()
             elif self.mode == "toggle":
+                if self._pending_ptt_release:
+                    # A leftover release from a hold we already stopped on the
+                    # mode switch (the key was still down). Consume this one so it
+                    # does not flip dictation on. One-shot; cleared here.
+                    self._pending_ptt_release = False
+                    return
                 self.dictation_active = not self.dictation_active
                 if self.on_toggle_dictation:
                     self.on_toggle_dictation(self.dictation_active)
@@ -197,6 +207,21 @@ class HotkeyManager:
                 return False
             self.ptt_active = False
             if self.on_push_to_talk_stop:
+                self.on_push_to_talk_stop()
+            return True
+
+    def _cancel_ptt(self):
+        """Abandon an in-flight capture (mode switch): clear ptt_active and fire
+        on_push_to_talk_cancel so the buffered audio is dropped, not transcribed.
+        Falls back to on_push_to_talk_stop only if no cancel handler is wired.
+        Returns True only for the call that made the transition."""
+        with self._state_lock:
+            if not self.ptt_active:
+                return False
+            self.ptt_active = False
+            if self.on_push_to_talk_cancel:
+                self.on_push_to_talk_cancel()
+            elif self.on_push_to_talk_stop:
                 self.on_push_to_talk_stop()
             return True
 
@@ -261,21 +286,31 @@ class HotkeyManager:
     def set_mode(self, mode: str):
         if mode not in ("push_to_talk", "toggle"):
             raise ValueError(f"Invalid mode: {mode}")
-        if self.mode == "toggle" and mode == "push_to_talk" and self.dictation_active:
-            self.dictation_active = False
-            if self.on_toggle_dictation:
-                self.on_toggle_dictation(False)
+        if self.mode == "toggle" and mode == "push_to_talk":
+            # The stray-release guard only has meaning in toggle mode; clear it so
+            # it can never strand across a switch back and swallow a real release.
+            self._pending_ptt_release = False
+            if self.dictation_active:
+                self.dictation_active = False
+                if self.on_toggle_dictation:
+                    self.on_toggle_dictation(False)
         # Symmetric to the above: leaving push-to-talk with a capture in flight
         # must stop it. Otherwise the in-flight press never gets its matching
         # release (subsequent ACTIVATED events route to dictation), so ptt_active
         # stays set, the mic keeps recording until shutdown, and tray health is
         # pinned at RECORDING.
         if self.mode == "push_to_talk" and mode == "toggle":
-            self._cancel_ptt_stop_timer()
-            # Stop the in-flight capture. On a hold-capable backend the physical
-            # key may still be down, so remember that its release is coming and
-            # must not be misread as a dictation toggle once we are in toggle mode.
-            if self._end_ptt() and self.supports_hold:
+            # A pending debounce stop-timer means the release already arrived and
+            # the key is physically up, so no further release is coming; only arm
+            # the swallow when the key is genuinely still held.
+            with self._ptt_timer_lock:
+                release_already_seen = self._ptt_stop_timer is not None
+                if self._ptt_stop_timer is not None:
+                    self._ptt_stop_timer.cancel()
+                    self._ptt_stop_timer = None
+            # Cancel (discard) rather than stop (transcribe): a mode switch is not
+            # a finished utterance, so the partial capture is dropped.
+            if self._cancel_ptt() and self.supports_hold and not release_already_seen:
                 self._pending_ptt_release = True
         old = self.mode
         self.mode = mode
