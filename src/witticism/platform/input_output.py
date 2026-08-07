@@ -520,10 +520,14 @@ class GnomeShellShortcutAdapter(ShortcutAdapter):
 
     async def _initialize(self):
         try:
+            from dbus_next import NameFlag
             from dbus_next.aio import MessageBus
 
             bus = await MessageBus().connect()
-            await bus.request_name(APP_BUS)
+            reply = await bus.request_name(APP_BUS, NameFlag.DO_NOT_QUEUE)
+            # The extension trusts whoever owns APP_BUS; if we cannot own it
+            # outright, refuse rather than run behind a squatter.
+            _require_primary_owner(reply, APP_BUS)
             introspection = await bus.introspect(GNOME_BUS, GNOME_PATH)
             obj = bus.get_proxy_object(GNOME_BUS, GNOME_PATH, introspection)
             self.interface = obj.get_interface(GNOME_INTERFACE)
@@ -596,7 +600,8 @@ def _build_control_interface(dispatch):
 
     dbus-next's service machinery is imported lazily so this module stays
     importable without dbus-next. ``dispatch`` is called with the shortcut id
-    each time a registered keybinding fires ``gdbus ... TriggerShortcut``.
+    and a caller-supplied token each time a registered keybinding fires
+    ``gdbus ... TriggerShortcut``; the adapter checks the token before acting.
     """
     from dbus_next.service import ServiceInterface, method
 
@@ -605,10 +610,31 @@ def _build_control_interface(dispatch):
             super().__init__(APP_CONTROL_INTERFACE)
 
         @method()
-        def TriggerShortcut(self, shortcut_id: "s"):  # noqa: F821 - dbus-next type
-            dispatch(shortcut_id)
+        def TriggerShortcut(self, shortcut_id: "s", token: "s"):  # noqa: F821 - dbus-next type
+            dispatch(shortcut_id, token)
 
     return _WitticismControl()
+
+
+def _require_primary_owner(reply, name):
+    """Raise unless we own ``name`` after ``request_name``.
+
+    dbus-next's ``request_name`` queues (rather than fails) when the well-known
+    name is already taken, and callers ignoring the reply would then run behind
+    whoever holds it - a squatter the GNOME extension's own sender check would
+    trust, or (more commonly) a still-running/hung earlier instance whose stale
+    owner would silently swallow our shortcut triggers. Refuse to operate in
+    that case. PRIMARY_OWNER (we took it) and ALREADY_OWNER (we held it on this
+    connection) both mean we own it and are fine.
+    """
+    from dbus_next import RequestNameReply
+
+    if reply not in (RequestNameReply.PRIMARY_OWNER, RequestNameReply.ALREADY_OWNER):
+        raise RuntimeError(
+            f"Could not take ownership of {name} (request_name returned {reply!r}); "
+            "another Witticism instance may already be running, or another process "
+            "holds the name. Refusing to run behind it"
+        )
 
 
 def _parse_uint(text, default):
@@ -720,6 +746,14 @@ class GnomeKeybindingShortcutAdapter(ShortcutAdapter):
         self.bus = None
         self._control = None
         self._tracker = None
+        # Per-process secret embedded in the registered gsettings command and
+        # required on every TriggerShortcut call, so a co-resident process
+        # cannot key the microphone on/off just by calling the well-known D-Bus
+        # method. The secret lives in the (same-UID-readable) gsettings command
+        # value, so this raises the bar against opportunistic/cross-app callers
+        # rather than defending against a determined same-UID attacker, which is
+        # not achievable on the session bus.
+        self._trigger_secret = uuid.uuid4().hex
         # Read the keyboard repeat settings up front (before HotkeyManager reads
         # supports_hold at construction). Injectable for tests.
         if keyboard_repeat is None:
@@ -824,10 +858,13 @@ class GnomeKeybindingShortcutAdapter(ShortcutAdapter):
     async def _export_control(self):
         from dbus_next.aio import MessageBus
 
+        from dbus_next import NameFlag
+
         self.bus = await MessageBus().connect()
         self._control = _build_control_interface(self._dispatch_trigger)
         self.bus.export(APP_OBJECT_PATH, self._control)
-        await self.bus.request_name(APP_BUS)
+        reply = await self.bus.request_name(APP_BUS, NameFlag.DO_NOT_QUEUE)
+        _require_primary_owner(reply, APP_BUS)
         logger.info("[PLATFORM_ADAPTER] GNOME keybinding control interface exported")
 
     async def _teardown_control(self):
@@ -845,7 +882,13 @@ class GnomeKeybindingShortcutAdapter(ShortcutAdapter):
         except Exception:
             pass
 
-    def _dispatch_trigger(self, shortcut_id):
+    def _dispatch_trigger(self, shortcut_id, token=None):
+        if token != self._trigger_secret:
+            logger.warning(
+                "[PLATFORM_ADAPTER] Rejecting TriggerShortcut with an invalid token "
+                "(id=%s); ignoring unauthenticated caller", shortcut_id
+            )
+            return
         if shortcut_id not in self._binding_ids:
             logger.debug("[PLATFORM_ADAPTER] Ignoring unknown TriggerShortcut id: %s", shortcut_id)
             return
@@ -883,13 +926,15 @@ class GnomeKeybindingShortcutAdapter(ShortcutAdapter):
     def _is_witticism_path(path):
         return path.startswith(f"{GNOME_CUSTOM_KEYBINDING_BASE}witticism-")
 
-    @staticmethod
-    def _trigger_command(binding_id):
+    def _trigger_command(self, binding_id):
+        # binding_id is always one of two hardcoded literals and the secret is
+        # hex, so both are shell-safe; the command is run by gnome-settings-daemon
+        # via word-splitting, never through /bin/sh -c.
         return (
             "gdbus call --session "
             f"--dest {APP_BUS} "
             f"--object-path {APP_OBJECT_PATH} "
-            f"--method {APP_CONTROL_INTERFACE}.TriggerShortcut {binding_id}"
+            f"--method {APP_CONTROL_INTERFACE}.TriggerShortcut {binding_id} {self._trigger_secret}"
         )
 
     def _read_custom_keybindings(self):
@@ -1114,6 +1159,9 @@ class RemoteDesktopTypeAdapter(TextOutputAdapter):
         self.interface = None
         self.session = None
         self.ready = False
+        # Serializes _type_text so two transcripts dictated in quick succession
+        # cannot interleave their keysyms. Created lazily on the runtime loop.
+        self._type_lock = None
         # Optional UI callback fired when automatic typing is lost (revoked from
         # the system indicator, or an injection failed because the session went
         # away) so the tray can re-surface its "Enable automatic typing..." entry.
@@ -1176,6 +1224,12 @@ class RemoteDesktopTypeAdapter(TextOutputAdapter):
         if not token:
             return
         self.token_file.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        # mkdir's mode only applies on creation; tighten defensively in case the
+        # state dir already existed with looser permissions.
+        try:
+            os.chmod(self.token_file.parent, 0o700)
+        except OSError:
+            pass
         temporary = self.token_file.with_suffix(".tmp")
         # Create the file 0600 from its first byte (no world-readable window
         # between write and chmod). O_CREAT's mode only applies on creation, so
@@ -1348,13 +1402,18 @@ class RemoteDesktopTypeAdapter(TextOutputAdapter):
         typed characters land everywhere - matching the X11 typing path. Each
         keysym carries its own case/symbol, so no shift modifier is synthesized.
         """
-        delay = self._type_delay_s()
-        for ch in text:
-            keysym = _char_to_keysym(ch)
-            await self.interface.call_notify_keyboard_keysym(self.session, {}, keysym, 1)  # press
-            await self.interface.call_notify_keyboard_keysym(self.session, {}, keysym, 0)  # release
-            if delay:
-                await asyncio.sleep(delay)
+        if self._type_lock is None:
+            # Safe to create here without a lock: _type_text only ever runs on
+            # the single runtime-loop thread.
+            self._type_lock = asyncio.Lock()
+        async with self._type_lock:
+            delay = self._type_delay_s()
+            for ch in text:
+                keysym = _char_to_keysym(ch)
+                await self.interface.call_notify_keyboard_keysym(self.session, {}, keysym, 1)  # press
+                await self.interface.call_notify_keyboard_keysym(self.session, {}, keysym, 0)  # release
+                if delay:
+                    await asyncio.sleep(delay)
 
     async def _close_session(self):
         if not self.bus or not self.session:

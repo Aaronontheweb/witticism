@@ -319,9 +319,11 @@ def test_token_file_created_0600_without_chmod_window(tmp_path, monkeypatch):
     adapter._store_token("secret")
 
     # The temp file was created 0600 from its first byte (mode passed to os.open),
-    # and no chmod was used (so there is no world-readable window).
+    # so the token file itself has no world-readable window: chmod is never called
+    # on the token file (only, at most, to tighten the parent state directory).
     assert open_modes == [0o600]
-    assert chmod_calls == []
+    assert all(call[0] == adapter.token_file.parent for call in chmod_calls)
+    assert adapter.token_file not in [call[0] for call in chmod_calls]
     assert stat.S_IMODE(adapter.token_file.stat().st_mode) == 0o600
 
 
@@ -673,7 +675,10 @@ def test_keybinding_registration_writes_entries_and_preserves_list(monkeypatch):
     command = next(c for c in sets if ptt in c[2] and c[3] == "command")
     assert "--dest com.stannardlabs.Witticism" in command[4]
     assert "--object-path /com/stannardlabs/Witticism" in command[4]
-    assert command[4].endswith("TriggerShortcut push_to_talk")
+    # The command carries the per-process auth secret as the second argument so
+    # an unauthenticated caller of TriggerShortcut is rejected.
+    assert command[4].endswith(f"TriggerShortcut push_to_talk {adapter._trigger_secret}")
+    assert len(adapter._trigger_secret) >= 16
     binding = next(c for c in sets if ptt in c[2] and c[3] == "binding")
     assert binding[4] == "F9"
     switch = next(c for c in sets if "witticism-mode-switch/" in c[2] and c[3] == "binding")
@@ -791,8 +796,10 @@ def test_keybinding_repeat_disabled_is_press_to_toggle():
     adapter._binding_ids = {"push_to_talk"}
     events = []
     adapter.on_event = events.append
-    adapter._dispatch_trigger("push_to_talk")   # press-only: single ACTIVATED
-    adapter._dispatch_trigger("not_a_binding")  # unknown -> ignored
+    secret = adapter._trigger_secret
+    adapter._dispatch_trigger("push_to_talk", secret)   # press-only: single ACTIVATED
+    adapter._dispatch_trigger("not_a_binding", secret)  # unknown -> ignored
+    adapter._dispatch_trigger("push_to_talk", "wrong")  # bad token -> ignored
     assert [e.id for e in events] == ["push_to_talk"]
     assert events[0].type == ShortcutEventType.ACTIVATED
 
@@ -812,8 +819,10 @@ def test_keybinding_repeat_enabled_supports_hold_and_routes_to_tracker():
     adapter._tracker = _FakeTracker()
     events = []
     adapter.on_event = events.append
-    adapter._dispatch_trigger("push_to_talk")   # routed to tracker, not emitted directly
-    adapter._dispatch_trigger("not_a_binding")  # unknown -> ignored, not routed
+    secret = adapter._trigger_secret
+    adapter._dispatch_trigger("push_to_talk", secret)   # routed to tracker, not emitted directly
+    adapter._dispatch_trigger("not_a_binding", secret)  # unknown -> ignored, not routed
+    adapter._dispatch_trigger("push_to_talk", "wrong")  # bad token -> ignored, not routed
     assert adapter._tracker.seen == ["push_to_talk"]
     assert events == []  # the tracker owns emission
 
@@ -821,9 +830,9 @@ def test_keybinding_repeat_enabled_supports_hold_and_routes_to_tracker():
 def test_keybinding_control_interface_routes_to_dispatch():
     pytest.importorskip("dbus_next")
     received = []
-    control = input_output._build_control_interface(received.append)
-    control.TriggerShortcut("push_to_talk")
-    assert received == ["push_to_talk"]
+    control = input_output._build_control_interface(lambda sid, token: received.append((sid, token)))
+    control.TriggerShortcut("push_to_talk", "secret123")
+    assert received == [("push_to_talk", "secret123")]
 
 
 # ---------------------------------------------------------------------------
@@ -1114,3 +1123,415 @@ def test_parse_uint_ignores_gsettings_type_annotation():
     assert _parse_uint("500", 0) == 500
     assert _parse_uint("", 123) == 123
     assert _parse_uint(None, 123) == 123
+
+
+# ---------------------------------------------------------------------------
+# set_mode must stop an in-flight push-to-talk capture when leaving PTT, or
+# ptt_active stays set, the mic records until shutdown, and tray health pins
+# at RECORDING (regression for the mode-switch-mid-recording bug).
+# ---------------------------------------------------------------------------
+
+def test_set_mode_ptt_to_toggle_stops_active_recording():
+    adapter = FakeNoHoldAdapter()
+    manager = HotkeyManager(FakeConfig(), adapter=adapter)
+    calls = []
+    manager.set_callbacks(
+        on_push_to_talk_start=lambda: calls.append("start"),
+        on_push_to_talk_stop=lambda: calls.append("stop"),
+    )
+    manager.start()
+    adapter.emit("push_to_talk", ShortcutEventType.ACTIVATED)  # press-to-toggle start
+    assert manager.ptt_active is True
+    manager.set_mode("toggle")
+    assert manager.ptt_active is False
+    assert calls == ["start", "stop"]
+
+
+def test_set_mode_ptt_to_toggle_is_noop_when_idle():
+    adapter = FakeNoHoldAdapter()
+    manager = HotkeyManager(FakeConfig(), adapter=adapter)
+    calls = []
+    manager.set_callbacks(
+        on_push_to_talk_start=lambda: calls.append("start"),
+        on_push_to_talk_stop=lambda: calls.append("stop"),
+    )
+    manager.start()
+    manager.set_mode("toggle")  # nothing recording -> no spurious stop
+    assert calls == []
+    assert manager.ptt_active is False
+
+
+def test_set_mode_toggle_to_ptt_still_stops_dictation():
+    adapter = FakeNoHoldAdapter()
+    manager = HotkeyManager(FakeConfig(), adapter=adapter)
+    dictation = []
+    manager.set_callbacks(on_toggle_dictation=lambda active: dictation.append(active))
+    manager.start()
+    manager.set_mode("toggle")
+    adapter.emit("push_to_talk", ShortcutEventType.ACTIVATED)  # dictation on
+    assert manager.dictation_active is True
+    manager.set_mode("push_to_talk")
+    assert manager.dictation_active is False
+    assert dictation == [True, False]
+
+
+def test_hotkey_manager_coerces_bad_mode_switch_to_default():
+    class _BadConfig:
+        def get(self, key, default=None):
+            if key == "hotkeys.mode_switch":
+                return None  # e.g. a partially-migrated/corrupt config
+            if key == "hotkeys.ptt_debounce_ms":
+                return 1
+            return default
+
+    manager = HotkeyManager(_BadConfig(), adapter=FakeShortcutAdapter())
+    assert manager.mode_switch_key == "Ctrl+Alt+M"  # coerced, not None
+
+
+# ---------------------------------------------------------------------------
+# D-Bus name-ownership guard.
+# ---------------------------------------------------------------------------
+
+def test_require_primary_owner_accepts_owner_and_rejects_squatter():
+    pytest.importorskip("dbus_next")
+    from dbus_next import RequestNameReply
+
+    # Owning the name (freshly or already) is fine.
+    input_output._require_primary_owner(RequestNameReply.PRIMARY_OWNER, input_output.APP_BUS)
+    input_output._require_primary_owner(RequestNameReply.ALREADY_OWNER, input_output.APP_BUS)
+    # Queued/blocked behind another owner is refused rather than run behind it.
+    for reply in (RequestNameReply.IN_QUEUE, RequestNameReply.EXISTS):
+        with pytest.raises(RuntimeError):
+            input_output._require_primary_owner(reply, input_output.APP_BUS)
+
+
+# ---------------------------------------------------------------------------
+# gsettings rollback: a failure mid-registration must restore the user's
+# original custom-keybindings list and reset the entries it wrote.
+# ---------------------------------------------------------------------------
+
+def test_keybinding_rollback_restores_list_on_failed_write(monkeypatch):
+    adapter = GnomeKeybindingShortcutAdapter(keyboard_repeat=(True, 500, 30))
+    adapter.bindings = [
+        ShortcutBinding("push_to_talk", "F9", ShortcutTrigger.HOLD),
+        ShortcutBinding("mode_switch", "Ctrl+Alt+M", ShortcutTrigger.ACTIVATE),
+    ]
+    adapter._binding_ids = {"push_to_talk", "mode_switch"}
+    user = _KB_BASE + "custom0/"
+    original = repr([user])
+    list_writes = []
+    reset_paths = []
+
+    def run(cmd, **kwargs):
+        if cmd[:2] == ["gsettings", "get"] and cmd[-1] == "custom-keybindings":
+            return _FakeProc(stdout=original)
+        if cmd[:2] == ["gsettings", "set"] and cmd[3] == "custom-keybindings":
+            written_list = ast.literal_eval(cmd[4])
+            list_writes.append(written_list)
+            # Fail the write that adds our entries; allow the rollback restore.
+            if any("witticism-" in p for p in written_list):
+                return _FakeProc(returncode=1, stderr="boom")
+            return _FakeProc()
+        if cmd[:2] == ["gsettings", "reset-recursively"]:
+            reset_paths.append(cmd[2])
+        return _FakeProc()
+
+    monkeypatch.setattr(input_output.subprocess, "run", run)
+    status = adapter._register()
+
+    assert status.state == AdapterState.FAILED
+    # Our just-written entries were reset, and the original user-only list restored.
+    assert any("witticism-push-to-talk" in p for p in reset_paths)
+    assert any("witticism-mode-switch" in p for p in reset_paths)
+    assert list_writes[-1] == [user]
+    # The user's own entry was never among the reset paths.
+    assert all("custom0" not in p for p in reset_paths)
+
+
+# ---------------------------------------------------------------------------
+# RemoteDesktop portal handshake (_open_session): the keyboard-granted bitmask,
+# restore-token persistence, and restore-token replay were previously untested.
+# ---------------------------------------------------------------------------
+
+def _remote_desktop_env(monkeypatch, adapter, started_result, select_options_capture):
+    import dbus_next.aio
+
+    monkeypatch.setattr(input_output, "portal_has_interface", lambda name: True)
+
+    class _Iface:
+        def call_create_session(self):
+            pass
+
+        def call_select_devices(self):
+            pass
+
+        def call_start(self):
+            pass
+
+    iface = _Iface()
+
+    class _Proxy:
+        def get_interface(self, name):
+            return iface
+
+    class _Bus:
+        def get_proxy_object(self, *args):
+            return _Proxy()
+
+        def disconnect(self):
+            pass
+
+    class _MB:
+        async def connect(self):
+            return _Bus()
+
+    monkeypatch.setattr(dbus_next.aio, "MessageBus", lambda: _MB())
+
+    async def fake_portal_request(bus, method, args, token):
+        if method == iface.call_create_session:
+            return {"session_handle": "/session/1"}
+        if method == iface.call_select_devices:
+            select_options_capture.append(args[1])
+            return {}
+        if method == iface.call_start:
+            return started_result
+        raise AssertionError("unexpected portal method")
+
+    monkeypatch.setattr(input_output, "_portal_request", fake_portal_request)
+
+    async def _noop_subscribe(self):
+        return None
+
+    monkeypatch.setattr(RemoteDesktopTypeAdapter, "_subscribe_session_closed", _noop_subscribe)
+    return iface
+
+
+def test_open_session_stores_token_when_keyboard_granted(monkeypatch, tmp_path):
+    pytest.importorskip("dbus_next")
+    adapter = RemoteDesktopTypeAdapter()
+    adapter.token_file = tmp_path / "state" / "wayland-portal.json"
+    captured = []
+    _remote_desktop_env(monkeypatch, adapter, {"devices": 1, "restore_token": "tok-123"}, captured)
+
+    asyncio.run(adapter._open_session())
+
+    assert adapter.ready is True
+    assert adapter.session == "/session/1"
+    assert adapter._load_token() == "tok-123"
+    assert "restore_token" not in captured[0]  # none existed to replay
+
+
+def test_open_session_raises_when_keyboard_not_granted(monkeypatch, tmp_path):
+    pytest.importorskip("dbus_next")
+    adapter = RemoteDesktopTypeAdapter()
+    adapter.token_file = tmp_path / "state" / "wayland-portal.json"
+    _remote_desktop_env(monkeypatch, adapter, {"devices": 0, "restore_token": "nope"}, [])
+
+    with pytest.raises(PermissionError):
+        asyncio.run(adapter._open_session())
+
+    assert adapter.ready is False
+    assert adapter._load_token() is None  # nothing persisted on denial
+
+
+def test_open_session_replays_existing_restore_token(monkeypatch, tmp_path):
+    pytest.importorskip("dbus_next")
+    adapter = RemoteDesktopTypeAdapter()
+    adapter.token_file = tmp_path / "state" / "wayland-portal.json"
+    adapter._store_token("prior-token")
+    captured = []
+    _remote_desktop_env(monkeypatch, adapter, {"devices": 1, "restore_token": "rotated"}, captured)
+
+    asyncio.run(adapter._open_session())
+
+    assert "restore_token" in captured[0]
+    assert captured[0]["restore_token"].value == "prior-token"
+    assert adapter._load_token() == "rotated"  # rotated token replaces the old one
+
+
+# ---------------------------------------------------------------------------
+# Concurrent transcripts must not interleave their keysyms.
+# ---------------------------------------------------------------------------
+
+def test_type_text_serializes_concurrent_calls():
+    pytest.importorskip("dbus_next")
+    adapter = RemoteDesktopTypeAdapter()
+    adapter.session = "/session/1"
+    order = []
+
+    class _Iface:
+        async def call_notify_keyboard_keysym(self, session, opts, keysym, state):
+            if state == 1:  # record presses only
+                order.append(chr(keysym))
+                await asyncio.sleep(0)  # yield: would interleave without the lock
+
+    adapter.interface = _Iface()
+
+    async def run():
+        await asyncio.gather(adapter._type_text("AB"), adapter._type_text("cd"))
+
+    asyncio.run(run())
+    assert "".join(order) in ("ABcd", "cdAB")  # never interleaved
+
+
+def test_store_token_tightens_loose_state_dir(tmp_path):
+    adapter = RemoteDesktopTypeAdapter()
+    state = tmp_path / "state"
+    state.mkdir()
+    os.chmod(state, 0o777)  # simulate a pre-existing world-accessible dir
+    adapter.token_file = state / "wayland-portal.json"
+
+    adapter._store_token("secret")
+
+    assert stat.S_IMODE(state.stat().st_mode) == 0o700
+
+
+# ---------------------------------------------------------------------------
+# set_mode on a hold-capable backend must not let a dangling key-release (the
+# key still held when the user switched modes via the tray) flip dictation on.
+# ---------------------------------------------------------------------------
+
+def test_set_mode_hold_backend_swallows_dangling_release():
+    adapter = FakeShortcutAdapter()  # supports_hold defaults True
+    manager = HotkeyManager(FakeConfig(), adapter=adapter)
+    events = []
+    manager.set_callbacks(
+        on_push_to_talk_start=lambda: events.append("start"),
+        on_push_to_talk_stop=lambda: events.append("stop"),
+        on_toggle_dictation=lambda active: events.append(("dict", active)),
+    )
+    manager.start()
+    adapter.emit("push_to_talk", ShortcutEventType.ACTIVATED)   # hold begins
+    assert manager.ptt_active is True
+    manager.set_mode("toggle")                                  # stops the capture
+    assert manager.ptt_active is False
+    adapter.emit("push_to_talk", ShortcutEventType.DEACTIVATED)  # trailing release
+    assert manager.dictation_active is False                    # NOT toggled on
+    assert events == ["start", "stop"]                          # no dictation event
+
+
+def test_hold_backend_toggle_mode_still_flips_dictation_on_release():
+    """The swallow only consumes the one dangling release; a normal toggle-mode
+    press/release still flips dictation."""
+    adapter = FakeShortcutAdapter()  # supports_hold True
+    manager = HotkeyManager(FakeConfig(), adapter=adapter)
+    flips = []
+    manager.set_callbacks(on_toggle_dictation=lambda active: flips.append(active))
+    manager.start()
+    manager.set_mode("toggle")  # nothing active -> no pending release
+    adapter.emit("push_to_talk", ShortcutEventType.ACTIVATED)
+    adapter.emit("push_to_talk", ShortcutEventType.DEACTIVATED)
+    assert flips == [True]
+    assert manager.dictation_active is True
+
+
+def test_ptt_transition_callbacks_fire_once_under_lock():
+    """_begin_ptt/_end_ptt fire their callback exactly once per real transition
+    (and inside the state lock, so start/stop cannot be reordered under a race)."""
+    adapter = FakeShortcutAdapter()
+    manager = HotkeyManager(FakeConfig(), adapter=adapter)
+    events = []
+    manager.set_callbacks(
+        on_push_to_talk_start=lambda: events.append("start"),
+        on_push_to_talk_stop=lambda: events.append("stop"),
+    )
+    manager.start()
+    assert manager._begin_ptt() is True
+    assert manager._begin_ptt() is False   # already active: no duplicate start
+    assert manager._end_ptt() is True
+    assert manager._end_ptt() is False     # already stopped: no duplicate stop
+    assert events == ["start", "stop"]
+
+
+def test_set_mode_after_release_debounce_commits_not_discards():
+    """If the key was already released (a completed utterance is waiting out the
+    debounce) when the user switches to toggle, that finished utterance is
+    committed (transcribed), NOT discarded, and no swallow is armed."""
+    adapter = FakeShortcutAdapter()  # supports_hold True
+    manager = HotkeyManager(DebounceConfig(1000), adapter=adapter)
+    events = []
+    flips = []
+    manager.set_callbacks(
+        on_push_to_talk_start=lambda: events.append("start"),
+        on_push_to_talk_stop=lambda: events.append("stop"),
+        on_push_to_talk_cancel=lambda: events.append("cancel"),
+        on_toggle_dictation=lambda active: flips.append(active),
+    )
+    manager.start()
+    adapter.emit("push_to_talk", ShortcutEventType.ACTIVATED)    # hold begins
+    adapter.emit("push_to_talk", ShortcutEventType.DEACTIVATED)  # release -> debounce stop scheduled
+    assert manager.ptt_active is True                            # still within debounce window
+    manager.set_mode("toggle")                                  # release already seen
+    assert events == ["start", "stop"]                          # committed, not "cancel"
+    assert manager._pending_ptt_release is False
+    adapter.emit("push_to_talk", ShortcutEventType.ACTIVATED)
+    adapter.emit("push_to_talk", ShortcutEventType.DEACTIVATED)
+    assert flips == [True]                                       # first toggle NOT swallowed
+
+
+def test_mode_switch_is_atomic_under_state_lock():
+    """set_mode holds _state_lock across the whole transition, so a shortcut
+    event delivered concurrently cannot interleave with the commit/cancel +
+    swallow-arm + mode-flip (the whole class of mode-switch races)."""
+    adapter = FakeShortcutAdapter()  # supports_hold True
+    manager = HotkeyManager(FakeConfig(), adapter=adapter)
+    manager.start()
+    adapter.emit("push_to_talk", ShortcutEventType.ACTIVATED)  # hold begins (key held)
+
+    # A shortcut event arriving mid-set_mode must block on the same lock. Prove
+    # mutual exclusion: while _state_lock is held, the handler cannot run.
+    import threading
+    ran = threading.Event()
+
+    def deliver_release():
+        adapter.emit("push_to_talk", ShortcutEventType.DEACTIVATED)
+        ran.set()
+
+    with manager._state_lock:
+        t = threading.Thread(target=deliver_release, daemon=True)
+        t.start()
+        assert not ran.wait(0.1)  # blocked on the lock, cannot interleave
+    t.join(timeout=1)
+    assert ran.is_set()  # proceeds once the lock is released
+
+
+def test_switch_out_and_back_does_not_strand_swallow():
+    """Switching PTT->toggle mid-hold then back to PTT must clear the swallow, so
+    a later genuine release is never eaten (which would leave the mic stuck)."""
+    adapter = FakeShortcutAdapter()  # supports_hold True
+    manager = HotkeyManager(FakeConfig(), adapter=adapter)  # debounce 1ms
+    events = []
+    manager.set_callbacks(
+        on_push_to_talk_start=lambda: events.append("start"),
+        on_push_to_talk_stop=lambda: events.append("stop"),
+    )
+    manager.start()
+    adapter.emit("push_to_talk", ShortcutEventType.ACTIVATED)   # hold begins (key still down)
+    manager.set_mode("toggle")
+    assert manager._pending_ptt_release is True                 # armed (key was held)
+    manager.set_mode("push_to_talk")
+    assert manager._pending_ptt_release is False                # cleared on switch back
+    events.clear()
+    adapter.emit("push_to_talk", ShortcutEventType.ACTIVATED)
+    adapter.emit("push_to_talk", ShortcutEventType.DEACTIVATED)
+    time.sleep(0.02)                                            # let the 1ms debounce stop fire
+    assert manager.ptt_active is False                          # not stuck recording
+    assert events == ["start", "stop"]
+
+
+def test_set_mode_cancels_not_stops_when_cancel_wired():
+    """With a cancel handler wired, leaving PTT mid-capture fires cancel
+    (discard), never stop (which would transcribe the partial)."""
+    adapter = FakeNoHoldAdapter()
+    manager = HotkeyManager(FakeConfig(), adapter=adapter)
+    events = []
+    manager.set_callbacks(
+        on_push_to_talk_start=lambda: events.append("start"),
+        on_push_to_talk_stop=lambda: events.append("stop"),
+        on_push_to_talk_cancel=lambda: events.append("cancel"),
+    )
+    manager.start()
+    adapter.emit("push_to_talk", ShortcutEventType.ACTIVATED)  # recording
+    manager.set_mode("toggle")
+    assert events == ["start", "cancel"]
+    assert manager.ptt_active is False

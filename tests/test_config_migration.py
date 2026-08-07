@@ -110,6 +110,78 @@ class TestConfigMigration(unittest.TestCase):
         self.assertEqual(config.get("hotkeys.mode_switch"), "keep-me")
         self.assertIsNone(config.get("hotkeys.toggle_enable"))
 
+    def test_null_toggle_enable_falls_back_to_default(self):
+        """A null legacy value must not persist as mode_switch (it would crash
+        accelerator parsing); the default applies instead."""
+        self._write({"hotkeys": {"toggle_enable": None}})
+        config = self._load()
+        self.assertEqual(config.get("hotkeys.mode_switch"), "ctrl+alt+m")
+        self.assertNotIn("toggle_enable", self._on_disk()["hotkeys"])
+
+    def test_non_string_toggle_enable_falls_back_to_default(self):
+        """A numeric legacy value is dropped rather than persisted."""
+        self._write({"hotkeys": {"toggle_enable": 5}})
+        config = self._load()
+        self.assertEqual(config.get("hotkeys.mode_switch"), "ctrl+alt+m")
+        self.assertNotIn("toggle_enable", self._on_disk()["hotkeys"])
+
+    def test_empty_string_toggle_enable_falls_back_to_default(self):
+        """An empty legacy value would be a non-functional binding; drop it."""
+        self._write({"hotkeys": {"toggle_enable": ""}})
+        config = self._load()
+        self.assertEqual(config.get("hotkeys.mode_switch"), "ctrl+alt+m")
+        self.assertNotIn("toggle_enable", self._on_disk()["hotkeys"])
+
+    def test_save_is_atomic_and_leaves_no_temp_file(self):
+        """save_config writes via a temp file + replace, leaving no .tmp behind
+        and always-valid JSON on disk."""
+        config = self._load()
+        config.set("model.size", "large")
+        tmp = self.config_path.with_name(self.config_path.name + ".tmp")
+        self.assertFalse(tmp.exists())
+        # File on disk is complete/valid and reflects the write.
+        self.assertEqual(self._on_disk()["model"]["size"], "large")
+
+    def test_failed_save_does_not_corrupt_existing_config(self):
+        """If the atomic write fails mid-flight, the previous config.json is
+        left intact (os.replace never ran) rather than truncated."""
+        import json as _json
+        config = self._load()
+        config.set("model.size", "base")
+        good = self._on_disk()
+
+        # Force json.dump to blow up partway through the temp write.
+        original_dump = _json.dump
+
+        def exploding_dump(*args, **kwargs):
+            raise OSError("disk full")
+
+        from witticism.utils import config_manager as cm
+        cm.json.dump = exploding_dump
+        try:
+            config.config["model"]["size"] = "large"
+            config.save_config()  # swallowed; must not corrupt the real file
+        finally:
+            cm.json.dump = original_dump
+
+        # The on-disk file is still the last good one, and no temp remains.
+        self.assertEqual(self._on_disk(), good)
+        tmp = self.config_path.with_name(self.config_path.name + ".tmp")
+        self.assertFalse(tmp.exists())
+
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_is_usable_accelerator_predicate():
+    """The single shared predicate used by both migration and HotkeyManager."""
+    from witticism.utils.config_manager import is_usable_accelerator
+    assert is_usable_accelerator("ctrl+alt+m")
+    assert is_usable_accelerator("<ctrl>+<alt>+m")
+    assert is_usable_accelerator("F9")
+    assert not is_usable_accelerator("")
+    assert not is_usable_accelerator("   ")
+    assert not is_usable_accelerator("+")
+    assert not is_usable_accelerator(None)
+    assert not is_usable_accelerator(5)

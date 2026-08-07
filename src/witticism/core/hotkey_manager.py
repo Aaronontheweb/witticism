@@ -1,3 +1,4 @@
+import functools
 import logging
 import threading
 import time
@@ -10,6 +11,7 @@ from witticism.platform.input_output import (
     ShortcutTrigger,
     create_shortcut_adapter,
 )
+from witticism.utils.config_manager import is_usable_accelerator
 
 logger = logging.getLogger(__name__)
 DEFAULT_PTT_DEBOUNCE_MS = 30
@@ -27,16 +29,33 @@ class HotkeyManager:
         self.listener = None
         self.on_push_to_talk_start: Optional[Callable] = None
         self.on_push_to_talk_stop: Optional[Callable] = None
+        # Fired when an in-flight capture is abandoned (not finished) - currently
+        # when a mode switch cancels it. Listeners should drop the audio without
+        # transcribing, distinct from on_push_to_talk_stop which commits it.
+        self.on_push_to_talk_cancel: Optional[Callable] = None
         self.on_toggle: Optional[Callable] = None
         self.on_toggle_dictation: Optional[Callable] = None
-        self.ptt_key = self._configured("hotkeys.push_to_talk", "f9")
-        self.mode_switch_key = self._configured("hotkeys.mode_switch", "Ctrl+Alt+M")
+        self.ptt_key = self._accel_or_default(self._configured("hotkeys.push_to_talk", "f9"), "f9")
+        self.mode_switch_key = self._accel_or_default(
+            self._configured("hotkeys.mode_switch", "Ctrl+Alt+M"), "Ctrl+Alt+M"
+        )
         self.ptt_active = False
         self.mode = "push_to_talk"
         self.dictation_active = False
         self.ptt_debounce_ms = int(self._configured("hotkeys.ptt_debounce_ms", DEFAULT_PTT_DEBOUNCE_MS))
         self._ptt_stop_timer: Optional[threading.Timer] = None
-        self._ptt_timer_lock = threading.Lock()
+        # One reentrant lock serializes ALL shortcut-state mutation across the
+        # three threads that touch it - the shortcut-event handler (D-Bus/pynput
+        # listener), the debounce Timer, and set_mode (GUI thread) - so a
+        # release, a firing stop-timer, and a mode switch can never interleave.
+        # Reentrant so the transition helpers can re-acquire it under a caller
+        # that already holds it. All of ptt_active, mode, dictation_active,
+        # _pending_ptt_release and _ptt_stop_timer are mutated only under it.
+        self._state_lock = threading.RLock()
+        # Set when a mode switch stops an in-progress hold whose key is still
+        # physically down; the next push_to_talk release is then swallowed so it
+        # does not flip dictation on.
+        self._pending_ptt_release = False
         self._last_toggle_press = 0.0
         # Backends that cannot observe key-release (e.g. a GNOME custom
         # keyboard shortcut) advertise supports_hold=False; the manager then
@@ -63,11 +82,13 @@ class HotkeyManager:
         on_push_to_talk_stop=None,
         on_toggle=None,
         on_toggle_dictation=None,
+        on_push_to_talk_cancel=None,
     ):
         self.on_push_to_talk_start = on_push_to_talk_start
         self.on_push_to_talk_stop = on_push_to_talk_stop
         self.on_toggle = on_toggle
         self.on_toggle_dictation = on_toggle_dictation
+        self.on_push_to_talk_cancel = on_push_to_talk_cancel
 
     def start(self):
         if self.listener:
@@ -86,51 +107,62 @@ class HotkeyManager:
 
     def stop(self):
         self._cancel_ptt_stop_timer()
-        if self.ptt_active:
-            self._do_ptt_stop()
+        self._do_ptt_stop()  # no-op if not recording
         self.adapter.stop()
         self.listener = None
         logger.info("[HOTKEY_MANAGER] STOPPED")
 
     def _on_shortcut_event(self, event: ShortcutEvent):
+        # Serialize the whole handler against set_mode and the debounce Timer, so
+        # release / stop-timer / mode-switch can never interleave. The lock is
+        # reentrant, so the transition helpers may re-acquire it.
         try:
-            if event.id == "mode_switch" and event.type == ShortcutEventType.ACTIVATED:
-                if self.on_toggle:
-                    self.on_toggle()
-                return
-            if event.id != "push_to_talk":
-                return
-            if event.type == ShortcutEventType.ACTIVATED:
-                if not self.supports_hold:
-                    # Press-only backend: the ACTIVATED press is the only signal
-                    # we ever get, so drive both modes from it. push_to_talk
-                    # alternates start/stop; toggle flips continuous dictation.
-                    if self.mode == "push_to_talk":
-                        self._toggle_ptt_press()
-                    elif self.mode == "toggle":
-                        self._toggle_dictation_press()
-                    return
-                if self.mode != "push_to_talk":
-                    return
-                self._cancel_ptt_stop_timer()
-                if not self.ptt_active:
-                    self.ptt_active = True
-                    if self.on_push_to_talk_start:
-                        self.on_push_to_talk_start()
-                return
-            if event.type != ShortcutEventType.DEACTIVATED:
-                return
-            if not self.supports_hold:
-                # Press-to-toggle backends never emit release events; ignore any.
-                return
-            if self.mode == "push_to_talk" and self.ptt_active:
-                self._schedule_ptt_stop() if self.ptt_debounce_ms > 0 else self._do_ptt_stop()
-            elif self.mode == "toggle":
-                self.dictation_active = not self.dictation_active
-                if self.on_toggle_dictation:
-                    self.on_toggle_dictation(self.dictation_active)
+            with self._state_lock:
+                self._handle_shortcut_event(event)
         except Exception:
             logger.exception("[HOTKEY_MANAGER] SHORTCUT_EVENT_ERROR")
+
+    def _handle_shortcut_event(self, event: ShortcutEvent):
+        if event.id == "mode_switch" and event.type == ShortcutEventType.ACTIVATED:
+            if self.on_toggle:
+                self.on_toggle()
+            return
+        if event.id != "push_to_talk":
+            return
+        if event.type == ShortcutEventType.ACTIVATED:
+            if not self.supports_hold:
+                # Press-only backend: the ACTIVATED press is the only signal we
+                # ever get, so drive both modes from it. push_to_talk alternates
+                # start/stop; toggle flips continuous dictation.
+                if self.mode == "push_to_talk":
+                    self._toggle_ptt_press()
+                elif self.mode == "toggle":
+                    self._toggle_dictation_press()
+                return
+            if self.mode != "push_to_talk":
+                return
+            self._cancel_ptt_stop_timer()
+            self._begin_ptt()
+            return
+        if event.type != ShortcutEventType.DEACTIVATED:
+            return
+        if not self.supports_hold:
+            # Press-to-toggle backends never emit release events; ignore any.
+            return
+        if self.mode == "push_to_talk":
+            # A real release always ends the capture.
+            if self.ptt_active:
+                self._schedule_ptt_stop() if self.ptt_debounce_ms > 0 else self._do_ptt_stop()
+        elif self.mode == "toggle":
+            if self._pending_ptt_release:
+                # Leftover release from a hold we stopped on the mode switch (the
+                # key was still down). Consume it so it does not flip dictation
+                # on. One-shot; armed and consumed under the same lock.
+                self._pending_ptt_release = False
+                return
+            self.dictation_active = not self.dictation_active
+            if self.on_toggle_dictation:
+                self.on_toggle_dictation(self.dictation_active)
 
     def _press_to_toggle_debounce_ms(self):
         # Press-to-toggle needs a much larger guard than hold-to-talk's release
@@ -150,14 +182,53 @@ class HotkeyManager:
     def _toggle_ptt_press(self):
         if not self._toggle_debounced():
             return
-        if not self.ptt_active:
+        # Alternate start/stop; each transition fires its own callback under the
+        # lock (see _begin_ptt / _end_ptt).
+        if not self._begin_ptt():
+            self._end_ptt()
+
+    def _begin_ptt(self):
+        """Atomically transition into recording and fire on_push_to_talk_start.
+
+        Returns True only for the call that made the transition. The callback is
+        fired while the lock is held so that, when a fresh press races a firing
+        stop-timer on another thread, the start/stop notifications reach
+        listeners in the same order as the underlying state transitions. The
+        callbacks only enqueue a Qt signal (or, in tests, do trivial work), so
+        holding the lock across them is cheap and cannot re-enter these methods.
+        """
+        with self._state_lock:
+            if self.ptt_active:
+                return False
             self.ptt_active = True
             if self.on_push_to_talk_start:
                 self.on_push_to_talk_start()
-        else:
+            return True
+
+    def _end_ptt(self):
+        """Atomically transition out of recording and fire on_push_to_talk_stop.
+
+        Returns True only for the call that made the transition. See _begin_ptt
+        for why the callback fires under the lock.
+        """
+        with self._state_lock:
+            if not self.ptt_active:
+                return False
             self.ptt_active = False
             if self.on_push_to_talk_stop:
                 self.on_push_to_talk_stop()
+            return True
+
+    def _flip_ptt_off(self):
+        """Flip ptt_active to False under the lock and report whether this call
+        made the transition. Fires no callback: set_mode runs the commit/cancel
+        callback AFTER releasing the lock, so blocking teardown never stalls the
+        listener/Timer threads waiting on the lock."""
+        with self._state_lock:
+            if not self.ptt_active:
+                return False
+            self.ptt_active = False
+            return True
 
     def _toggle_dictation_press(self):
         # Toggle (continuous dictation) mode on a press-only backend: each press
@@ -170,7 +241,7 @@ class HotkeyManager:
             self.on_toggle_dictation(self.dictation_active)
 
     def _schedule_ptt_stop(self):
-        with self._ptt_timer_lock:
+        with self._state_lock:
             if self._ptt_stop_timer is not None:
                 self._ptt_stop_timer.cancel()
             self._ptt_stop_timer = threading.Timer(self.ptt_debounce_ms / 1000.0, self._do_ptt_stop)
@@ -178,18 +249,18 @@ class HotkeyManager:
             self._ptt_stop_timer.start()
 
     def _cancel_ptt_stop_timer(self):
-        with self._ptt_timer_lock:
+        with self._state_lock:
             if self._ptt_stop_timer is not None:
                 self._ptt_stop_timer.cancel()
                 self._ptt_stop_timer = None
 
     def _do_ptt_stop(self):
-        with self._ptt_timer_lock:
+        # Null the timer AND end the capture atomically, so no other thread can
+        # observe the timer cleared while ptt_active is still True (which would
+        # misread a completed utterance as in-progress and discard it).
+        with self._state_lock:
             self._ptt_stop_timer = None
-        if self.ptt_active:
-            self.ptt_active = False
-            if self.on_push_to_talk_stop:
-                self.on_push_to_talk_stop()
+            self._end_ptt()
 
     def update_hotkey_from_string(self, key_string: str, hotkey_type: str = "ptt"):
         if hotkey_type != "ptt" or not self._valid_ptt_key(key_string):
@@ -208,16 +279,58 @@ class HotkeyManager:
         upper = key_string.upper()
         return upper in {f"F{i}" for i in range(1, 13)} | {"SPACE", "TAB", "ENTER", "ESC"} or len(key_string) == 1
 
-    def change_ptt_key(self, key):
-        return self.update_hotkey_from_string(str(getattr(key, "name", key)))
+    @staticmethod
+    def _accel_or_default(value, default):
+        """Coerce a configured accelerator to a usable string.
+
+        A null/number/empty/modifier-only value (from a hand-edited or
+        partially-migrated config) would otherwise reach the accelerator parser,
+        which raises on a non-string. Uses the same usability rule as the config
+        migration (is_usable_accelerator) so the two cannot diverge; falls back
+        to the default so a bad config disables nothing.
+        """
+        return value if is_usable_accelerator(value) else default
 
     def set_mode(self, mode: str):
         if mode not in ("push_to_talk", "toggle"):
             raise ValueError(f"Invalid mode: {mode}")
-        if self.mode == "toggle" and mode == "push_to_talk" and self.dictation_active:
-            self.dictation_active = False
-            if self.on_toggle_dictation:
-                self.on_toggle_dictation(False)
-        old = self.mode
-        self.mode = mode
+        # Decide + flip the state under the lock so a shortcut release or a
+        # firing stop-timer cannot interleave with the commit/cancel decision,
+        # the swallow-arm, and the mode flip - they move as one unit. But run the
+        # resulting callback (which, on the GUI thread, synchronously tears down
+        # audio and joins worker threads) AFTER releasing the lock, so the lock
+        # is never held across blocking teardown.
+        deferred = None
+        with self._state_lock:
+            old = self.mode
+            if old == "toggle" and mode == "push_to_talk":
+                # The stray-release guard only has meaning in toggle mode; clear
+                # it so it can never strand across a switch back.
+                self._pending_ptt_release = False
+                if self.dictation_active:
+                    self.dictation_active = False
+                    if self.on_toggle_dictation:
+                        deferred = functools.partial(self.on_toggle_dictation, False)
+            elif old == "push_to_talk" and mode == "toggle":
+                # Leaving push-to-talk with a capture in flight must end it, or
+                # the in-flight press never gets its matching release and the mic
+                # records until shutdown. A pending debounce stop-timer means the
+                # key was already released (a COMPLETED utterance waiting out the
+                # debounce) - commit it. Otherwise the key is still held (an
+                # in-progress partial) - discard it and swallow the trailing
+                # release so it does not flip dictation on.
+                release_already_seen = self._ptt_stop_timer is not None
+                if self._ptt_stop_timer is not None:
+                    self._ptt_stop_timer.cancel()
+                    self._ptt_stop_timer = None
+                if self._flip_ptt_off():
+                    if release_already_seen:
+                        deferred = self.on_push_to_talk_stop        # commit (transcribe)
+                    else:
+                        if self.supports_hold:
+                            self._pending_ptt_release = True
+                        deferred = self.on_push_to_talk_cancel or self.on_push_to_talk_stop
+            self.mode = mode
+        if deferred:
+            deferred()
         logger.info("[HOTKEY_MANAGER] MODE_CHANGED: from %s to %s", old, mode)

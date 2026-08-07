@@ -1,11 +1,26 @@
 import copy
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Dict, Any
 import platformdirs
 
 logger = logging.getLogger(__name__)
+
+
+def is_usable_accelerator(value: Any) -> bool:
+    """Whether ``value`` is a usable accelerator string.
+
+    Single source of truth shared by the config migration and HotkeyManager so
+    the "is this accelerator usable?" decision cannot diverge between them. A
+    value is usable only if it is a string with at least one non-empty
+    ``+``-separated token (tolerating legacy angle brackets). Rejects None,
+    numbers, ``""``, whitespace, and ``"+"``.
+    """
+    if not isinstance(value, str):
+        return False
+    return any(token.strip().strip("<>").strip() for token in value.split("+"))
 
 
 class ConfigManager:
@@ -132,24 +147,48 @@ class ConfigManager:
             return False
 
         if "mode_switch" not in hotkeys:
-            hotkeys["mode_switch"] = self._normalize_accelerator(hotkeys["toggle_enable"])
-            logger.info("Migrated hotkeys.toggle_enable to hotkeys.mode_switch")
+            normalized = self._normalize_accelerator(hotkeys["toggle_enable"])
+            # Only carry over a usable accelerator. A legacy value that is not a
+            # usable string (null/number from a hand-edited or corrupted config,
+            # or an empty/modifier-only value) is dropped so the default
+            # mode_switch applies on merge, instead of persisting a value that
+            # later crashes accelerator parsing or silently disables the hotkey.
+            if is_usable_accelerator(normalized):
+                hotkeys["mode_switch"] = normalized
+                logger.info("Migrated hotkeys.toggle_enable to hotkeys.mode_switch")
+            else:
+                logger.warning(
+                    "Dropped unusable legacy hotkeys.toggle_enable value %r; "
+                    "using the default mode_switch", hotkeys["toggle_enable"]
+                )
         del hotkeys["toggle_enable"]
         return True
 
     def save_config(self) -> None:
+        tmp_file = self.config_file.with_name(self.config_file.name + ".tmp")
         try:
             # Create config directory if it doesn't exist
             self.config_dir.mkdir(parents=True, exist_ok=True)
 
-            # Save config
-            with open(self.config_file, 'w') as f:
+            # Write to a sibling temp file then atomically replace, so an
+            # interrupted write (crash, power loss, disk full) can never leave a
+            # truncated config.json that resets every setting to defaults on the
+            # next load. The migration on load makes this the first unattended
+            # write most upgrading users hit, so atomicity matters.
+            with open(tmp_file, 'w') as f:
                 json.dump(self.config, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_file, self.config_file)
 
             logger.info(f"Config saved to {self.config_file}")
 
         except Exception as e:
             logger.error(f"Failed to save config: {e}")
+            try:
+                os.unlink(tmp_file)
+            except OSError:
+                pass
 
     def get(self, key: str, default: Any = None) -> Any:
         keys = key.split('.')
