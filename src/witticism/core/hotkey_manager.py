@@ -10,6 +10,7 @@ from witticism.platform.input_output import (
     ShortcutTrigger,
     create_shortcut_adapter,
 )
+from witticism.utils.config_manager import is_usable_accelerator
 
 logger = logging.getLogger(__name__)
 DEFAULT_PTT_DEBOUNCE_MS = 30
@@ -43,6 +44,9 @@ class HotkeyManager:
         # listener) and the debounce Timer thread, so a fresh press racing a
         # firing stop-timer cannot corrupt the recording state.
         self._state_lock = threading.Lock()
+        # Set when a mode switch stops an active hold whose key may still be
+        # physically down; the next push_to_talk release is then swallowed.
+        self._pending_ptt_release = False
         self._last_toggle_press = 0.0
         # Backends that cannot observe key-release (e.g. a GNOME custom
         # keyboard shortcut) advertise supports_hold=False; the manager then
@@ -119,10 +123,15 @@ class HotkeyManager:
                 if self.mode != "push_to_talk":
                     return
                 self._cancel_ptt_stop_timer()
-                if self._begin_ptt() and self.on_push_to_talk_start:
-                    self.on_push_to_talk_start()
+                self._begin_ptt()
                 return
             if event.type != ShortcutEventType.DEACTIVATED:
+                return
+            if self._pending_ptt_release:
+                # A leftover physical key-release from a capture we already
+                # stopped on a mode switch (the key was still held). Consume it
+                # so it does not fall through and flip dictation on.
+                self._pending_ptt_release = False
                 return
             if not self.supports_hold:
                 # Press-to-toggle backends never emit release events; ignore any.
@@ -154,29 +163,41 @@ class HotkeyManager:
     def _toggle_ptt_press(self):
         if not self._toggle_debounced():
             return
-        if self._begin_ptt():
-            if self.on_push_to_talk_start:
-                self.on_push_to_talk_start()
-        elif self._end_ptt():
-            if self.on_push_to_talk_stop:
-                self.on_push_to_talk_stop()
+        # Alternate start/stop; each transition fires its own callback under the
+        # lock (see _begin_ptt / _end_ptt).
+        if not self._begin_ptt():
+            self._end_ptt()
 
     def _begin_ptt(self):
-        """Atomically transition into recording. Returns True only for the call
-        that made the transition, which should then fire on_push_to_talk_start."""
+        """Atomically transition into recording and fire on_push_to_talk_start.
+
+        Returns True only for the call that made the transition. The callback is
+        fired while the lock is held so that, when a fresh press races a firing
+        stop-timer on another thread, the start/stop notifications reach
+        listeners in the same order as the underlying state transitions. The
+        callbacks only enqueue a Qt signal (or, in tests, do trivial work), so
+        holding the lock across them is cheap and cannot re-enter these methods.
+        """
         with self._state_lock:
             if self.ptt_active:
                 return False
             self.ptt_active = True
+            if self.on_push_to_talk_start:
+                self.on_push_to_talk_start()
             return True
 
     def _end_ptt(self):
-        """Atomically transition out of recording. Returns True only for the
-        call that made the transition, which should fire on_push_to_talk_stop."""
+        """Atomically transition out of recording and fire on_push_to_talk_stop.
+
+        Returns True only for the call that made the transition. See _begin_ptt
+        for why the callback fires under the lock.
+        """
         with self._state_lock:
             if not self.ptt_active:
                 return False
             self.ptt_active = False
+            if self.on_push_to_talk_stop:
+                self.on_push_to_talk_stop()
             return True
 
     def _toggle_dictation_press(self):
@@ -206,8 +227,7 @@ class HotkeyManager:
     def _do_ptt_stop(self):
         with self._ptt_timer_lock:
             self._ptt_stop_timer = None
-        if self._end_ptt() and self.on_push_to_talk_stop:
-            self.on_push_to_talk_stop()
+        self._end_ptt()
 
     def update_hotkey_from_string(self, key_string: str, hotkey_type: str = "ptt"):
         if hotkey_type != "ptt" or not self._valid_ptt_key(key_string):
@@ -230,13 +250,13 @@ class HotkeyManager:
     def _accel_or_default(value, default):
         """Coerce a configured accelerator to a usable string.
 
-        A null/number/empty value (from a hand-edited or partially-migrated
-        config) would otherwise reach the accelerator parser, which raises on a
-        non-string. Fall back to the default so a bad config disables nothing.
+        A null/number/empty/modifier-only value (from a hand-edited or
+        partially-migrated config) would otherwise reach the accelerator parser,
+        which raises on a non-string. Uses the same usability rule as the config
+        migration (is_usable_accelerator) so the two cannot diverge; falls back
+        to the default so a bad config disables nothing.
         """
-        if isinstance(value, str) and value.strip():
-            return value
-        return default
+        return value if is_usable_accelerator(value) else default
 
     def set_mode(self, mode: str):
         if mode not in ("push_to_talk", "toggle"):
@@ -252,7 +272,11 @@ class HotkeyManager:
         # pinned at RECORDING.
         if self.mode == "push_to_talk" and mode == "toggle":
             self._cancel_ptt_stop_timer()
-            self._do_ptt_stop()
+            # Stop the in-flight capture. On a hold-capable backend the physical
+            # key may still be down, so remember that its release is coming and
+            # must not be misread as a dictation toggle once we are in toggle mode.
+            if self._end_ptt() and self.supports_hold:
+                self._pending_ptt_release = True
         old = self.mode
         self.mode = mode
         logger.info("[HOTKEY_MANAGER] MODE_CHANGED: from %s to %s", old, mode)

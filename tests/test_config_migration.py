@@ -172,3 +172,16 @@ class TestConfigMigration(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_is_usable_accelerator_predicate():
+    """The single shared predicate used by both migration and HotkeyManager."""
+    from witticism.utils.config_manager import is_usable_accelerator
+    assert is_usable_accelerator("ctrl+alt+m")
+    assert is_usable_accelerator("<ctrl>+<alt>+m")
+    assert is_usable_accelerator("F9")
+    assert not is_usable_accelerator("")
+    assert not is_usable_accelerator("   ")
+    assert not is_usable_accelerator("+")
+    assert not is_usable_accelerator(None)
+    assert not is_usable_accelerator(5)

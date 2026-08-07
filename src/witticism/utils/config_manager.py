@@ -9,6 +9,20 @@ import platformdirs
 logger = logging.getLogger(__name__)
 
 
+def is_usable_accelerator(value: Any) -> bool:
+    """Whether ``value`` is a usable accelerator string.
+
+    Single source of truth shared by the config migration and HotkeyManager so
+    the "is this accelerator usable?" decision cannot diverge between them. A
+    value is usable only if it is a string with at least one non-empty
+    ``+``-separated token (tolerating legacy angle brackets). Rejects None,
+    numbers, ``""``, whitespace, and ``"+"``.
+    """
+    if not isinstance(value, str):
+        return False
+    return any(token.strip().strip("<>").strip() for token in value.split("+"))
+
+
 class ConfigManager:
     def __init__(self, app_name: str = "witticism"):
         self.app_name = app_name
@@ -135,11 +149,11 @@ class ConfigManager:
         if "mode_switch" not in hotkeys:
             normalized = self._normalize_accelerator(hotkeys["toggle_enable"])
             # Only carry over a usable accelerator. A legacy value that is not a
-            # non-empty string (null/number from a hand-edited or corrupted
-            # config, or an empty string) is dropped so the default mode_switch
-            # applies on merge, instead of persisting a value that later crashes
-            # accelerator parsing or silently disables the hotkey.
-            if isinstance(normalized, str) and normalized.strip("+ "):
+            # usable string (null/number from a hand-edited or corrupted config,
+            # or an empty/modifier-only value) is dropped so the default
+            # mode_switch applies on merge, instead of persisting a value that
+            # later crashes accelerator parsing or silently disables the hotkey.
+            if is_usable_accelerator(normalized):
                 hotkeys["mode_switch"] = normalized
                 logger.info("Migrated hotkeys.toggle_enable to hotkeys.mode_switch")
             else:

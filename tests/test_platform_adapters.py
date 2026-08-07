@@ -1196,7 +1196,10 @@ def test_require_primary_owner_accepts_owner_and_rejects_squatter():
     pytest.importorskip("dbus_next")
     from dbus_next import RequestNameReply
 
+    # Owning the name (freshly or already) is fine.
     input_output._require_primary_owner(RequestNameReply.PRIMARY_OWNER, input_output.APP_BUS)
+    input_output._require_primary_owner(RequestNameReply.ALREADY_OWNER, input_output.APP_BUS)
+    # Queued/blocked behind another owner is refused rather than run behind it.
     for reply in (RequestNameReply.IN_QUEUE, RequestNameReply.EXISTS):
         with pytest.raises(RuntimeError):
             input_output._require_primary_owner(reply, input_output.APP_BUS)
@@ -1381,3 +1384,60 @@ def test_store_token_tightens_loose_state_dir(tmp_path):
     adapter._store_token("secret")
 
     assert stat.S_IMODE(state.stat().st_mode) == 0o700
+
+
+# ---------------------------------------------------------------------------
+# set_mode on a hold-capable backend must not let a dangling key-release (the
+# key still held when the user switched modes via the tray) flip dictation on.
+# ---------------------------------------------------------------------------
+
+def test_set_mode_hold_backend_swallows_dangling_release():
+    adapter = FakeShortcutAdapter()  # supports_hold defaults True
+    manager = HotkeyManager(FakeConfig(), adapter=adapter)
+    events = []
+    manager.set_callbacks(
+        on_push_to_talk_start=lambda: events.append("start"),
+        on_push_to_talk_stop=lambda: events.append("stop"),
+        on_toggle_dictation=lambda active: events.append(("dict", active)),
+    )
+    manager.start()
+    adapter.emit("push_to_talk", ShortcutEventType.ACTIVATED)   # hold begins
+    assert manager.ptt_active is True
+    manager.set_mode("toggle")                                  # stops the capture
+    assert manager.ptt_active is False
+    adapter.emit("push_to_talk", ShortcutEventType.DEACTIVATED)  # trailing release
+    assert manager.dictation_active is False                    # NOT toggled on
+    assert events == ["start", "stop"]                          # no dictation event
+
+
+def test_hold_backend_toggle_mode_still_flips_dictation_on_release():
+    """The swallow only consumes the one dangling release; a normal toggle-mode
+    press/release still flips dictation."""
+    adapter = FakeShortcutAdapter()  # supports_hold True
+    manager = HotkeyManager(FakeConfig(), adapter=adapter)
+    flips = []
+    manager.set_callbacks(on_toggle_dictation=lambda active: flips.append(active))
+    manager.start()
+    manager.set_mode("toggle")  # nothing active -> no pending release
+    adapter.emit("push_to_talk", ShortcutEventType.ACTIVATED)
+    adapter.emit("push_to_talk", ShortcutEventType.DEACTIVATED)
+    assert flips == [True]
+    assert manager.dictation_active is True
+
+
+def test_ptt_transition_callbacks_fire_once_under_lock():
+    """_begin_ptt/_end_ptt fire their callback exactly once per real transition
+    (and inside the state lock, so start/stop cannot be reordered under a race)."""
+    adapter = FakeShortcutAdapter()
+    manager = HotkeyManager(FakeConfig(), adapter=adapter)
+    events = []
+    manager.set_callbacks(
+        on_push_to_talk_start=lambda: events.append("start"),
+        on_push_to_talk_stop=lambda: events.append("stop"),
+    )
+    manager.start()
+    assert manager._begin_ptt() is True
+    assert manager._begin_ptt() is False   # already active: no duplicate start
+    assert manager._end_ptt() is True
+    assert manager._end_ptt() is False     # already stopped: no duplicate stop
+    assert events == ["start", "stop"]

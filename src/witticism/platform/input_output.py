@@ -617,19 +617,23 @@ def _build_control_interface(dispatch):
 
 
 def _require_primary_owner(reply, name):
-    """Raise unless ``reply`` from ``request_name`` is PRIMARY_OWNER.
+    """Raise unless we own ``name`` after ``request_name``.
 
     dbus-next's ``request_name`` queues (rather than fails) when the well-known
     name is already taken, and callers ignoring the reply would then run behind
-    a squatter that the GNOME extension's own sender check would trust. Refuse
-    to operate in that case.
+    whoever holds it - a squatter the GNOME extension's own sender check would
+    trust, or (more commonly) a still-running/hung earlier instance whose stale
+    owner would silently swallow our shortcut triggers. Refuse to operate in
+    that case. PRIMARY_OWNER (we took it) and ALREADY_OWNER (we held it on this
+    connection) both mean we own it and are fine.
     """
     from dbus_next import RequestNameReply
 
-    if reply != RequestNameReply.PRIMARY_OWNER:
+    if reply not in (RequestNameReply.PRIMARY_OWNER, RequestNameReply.ALREADY_OWNER):
         raise RuntimeError(
-            f"Another process already owns {name} (request_name returned {reply!r}); "
-            "refusing to run alongside a possible D-Bus name squatter"
+            f"Could not take ownership of {name} (request_name returned {reply!r}); "
+            "another Witticism instance may already be running, or another process "
+            "holds the name. Refusing to run behind it"
         )
 
 

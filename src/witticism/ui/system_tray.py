@@ -733,11 +733,11 @@ class SystemTrayApp(QSystemTrayIcon):
         if mode == "push_to_talk" and self.is_dictating:
             self.stop_dictation()
 
-        # Symmetric: switching away from push-to-talk with a capture in flight
-        # must stop the mic. The hotkey manager stops it too when its callbacks
-        # are wired, but the tray must not depend on that; stop_recording() is
-        # idempotent, so at most one of the two takes effect.
-        if mode == "toggle" and self.is_recording:
+        # Switching away from push-to-talk with a capture in flight must stop
+        # the mic. When a hotkey manager is present, set_mode() above already did
+        # this synchronously via its stop callback; this is only the fallback for
+        # the no-hotkey-manager case, so the stop is issued in exactly one place.
+        if mode == "toggle" and self.is_recording and self.hotkey_manager is None:
             self.stop_recording()
 
         logger.info(f"Mode changed to: {mode}")
