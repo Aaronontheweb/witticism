@@ -59,6 +59,14 @@ class SystemTrayApp(QSystemTrayIcon):
     # Automatic typing was lost mid-session (revoked from the system indicator,
     # or an injection failed because the session went away); D-Bus thread.
     autopaste_revoked = pyqtSignal()
+    # Hotkey adapter callbacks fire on the D-Bus runtime / debounce Timer
+    # thread. These signals marshal each event onto the GUI thread before any
+    # widget is touched (Qt queues cross-thread signal deliveries; a same-thread
+    # emit stays a direct call).
+    ptt_start_requested = pyqtSignal()
+    ptt_stop_requested = pyqtSignal()
+    toggle_enabled_requested = pyqtSignal()
+    toggle_dictation_requested = pyqtSignal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -725,6 +733,13 @@ class SystemTrayApp(QSystemTrayIcon):
         if mode == "push_to_talk" and self.is_dictating:
             self.stop_dictation()
 
+        # Symmetric: switching away from push-to-talk with a capture in flight
+        # must stop the mic. The hotkey manager stops it too when its callbacks
+        # are wired, but the tray must not depend on that; stop_recording() is
+        # idempotent, so at most one of the two takes effect.
+        if mode == "toggle" and self.is_recording:
+            self.stop_recording()
+
         logger.info(f"Mode changed to: {mode}")
 
     def toggle_dictation(self, active: bool):
@@ -830,6 +845,21 @@ class SystemTrayApp(QSystemTrayIcon):
             self._autopaste_broken = False
             self._refresh_autopaste_action()
             self.refresh_health()
+
+    # Thread-safe entry points wired to the hotkey manager. Each only emits a
+    # signal, so the real handler always runs on the GUI thread even when the
+    # hotkey event originated on the D-Bus runtime or debounce Timer thread.
+    def request_ptt_start(self):
+        self.ptt_start_requested.emit()
+
+    def request_ptt_stop(self):
+        self.ptt_stop_requested.emit()
+
+    def request_toggle_enabled(self):
+        self.toggle_enabled_requested.emit()
+
+    def request_toggle_dictation(self, active):
+        self.toggle_dictation_requested.emit(bool(active))
 
     def _emit_autopaste_result(self, granted, message):
         """Bridge the adapter's D-Bus-thread callback onto the GUI thread."""
@@ -1067,6 +1097,11 @@ class SystemTrayApp(QSystemTrayIcon):
         try:
             self.autopaste_result.connect(self._on_autopaste_result)
             self.autopaste_revoked.connect(self._on_autopaste_revoked)
+            # Marshal hotkey events onto the GUI thread before they touch widgets.
+            self.ptt_start_requested.connect(self.start_recording)
+            self.ptt_stop_requested.connect(self.stop_recording)
+            self.toggle_enabled_requested.connect(self.toggle_enabled)
+            self.toggle_dictation_requested.connect(self.toggle_dictation)
             # Re-evaluate the offer's visibility every time the menu opens so it
             # reflects the current granted-state, not just the state at startup.
             self.menu.aboutToShow.connect(self._refresh_autopaste_action)

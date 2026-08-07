@@ -358,11 +358,15 @@ class WitticismApp:
 
     def setup_connections(self):
         # Connect hotkey manager to system tray
+        # Route through the tray's request_* wrappers, which emit Qt signals so
+        # the handlers run on the GUI thread. Hotkey callbacks fire on the D-Bus
+        # runtime / debounce Timer thread, where touching widgets directly is
+        # unsafe.
         self.hotkey_manager.set_callbacks(
-            on_push_to_talk_start=self.tray_app.start_recording,
-            on_push_to_talk_stop=self.tray_app.stop_recording,
-            on_toggle=self.tray_app.toggle_enabled,
-            on_toggle_dictation=self.tray_app.toggle_dictation
+            on_push_to_talk_start=self.tray_app.request_ptt_start,
+            on_push_to_talk_stop=self.tray_app.request_ptt_stop,
+            on_toggle=self.tray_app.request_toggle_enabled,
+            on_toggle_dictation=self.tray_app.request_toggle_dictation
         )
 
         # Pass components to tray app

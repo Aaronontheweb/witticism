@@ -29,14 +29,20 @@ class HotkeyManager:
         self.on_push_to_talk_stop: Optional[Callable] = None
         self.on_toggle: Optional[Callable] = None
         self.on_toggle_dictation: Optional[Callable] = None
-        self.ptt_key = self._configured("hotkeys.push_to_talk", "f9")
-        self.mode_switch_key = self._configured("hotkeys.mode_switch", "Ctrl+Alt+M")
+        self.ptt_key = self._accel_or_default(self._configured("hotkeys.push_to_talk", "f9"), "f9")
+        self.mode_switch_key = self._accel_or_default(
+            self._configured("hotkeys.mode_switch", "Ctrl+Alt+M"), "Ctrl+Alt+M"
+        )
         self.ptt_active = False
         self.mode = "push_to_talk"
         self.dictation_active = False
         self.ptt_debounce_ms = int(self._configured("hotkeys.ptt_debounce_ms", DEFAULT_PTT_DEBOUNCE_MS))
         self._ptt_stop_timer: Optional[threading.Timer] = None
         self._ptt_timer_lock = threading.Lock()
+        # Guards ptt_active across the shortcut-event thread (D-Bus/pynput
+        # listener) and the debounce Timer thread, so a fresh press racing a
+        # firing stop-timer cannot corrupt the recording state.
+        self._state_lock = threading.Lock()
         self._last_toggle_press = 0.0
         # Backends that cannot observe key-release (e.g. a GNOME custom
         # keyboard shortcut) advertise supports_hold=False; the manager then
@@ -113,10 +119,8 @@ class HotkeyManager:
                 if self.mode != "push_to_talk":
                     return
                 self._cancel_ptt_stop_timer()
-                if not self.ptt_active:
-                    self.ptt_active = True
-                    if self.on_push_to_talk_start:
-                        self.on_push_to_talk_start()
+                if self._begin_ptt() and self.on_push_to_talk_start:
+                    self.on_push_to_talk_start()
                 return
             if event.type != ShortcutEventType.DEACTIVATED:
                 return
@@ -150,14 +154,30 @@ class HotkeyManager:
     def _toggle_ptt_press(self):
         if not self._toggle_debounced():
             return
-        if not self.ptt_active:
-            self.ptt_active = True
+        if self._begin_ptt():
             if self.on_push_to_talk_start:
                 self.on_push_to_talk_start()
-        else:
-            self.ptt_active = False
+        elif self._end_ptt():
             if self.on_push_to_talk_stop:
                 self.on_push_to_talk_stop()
+
+    def _begin_ptt(self):
+        """Atomically transition into recording. Returns True only for the call
+        that made the transition, which should then fire on_push_to_talk_start."""
+        with self._state_lock:
+            if self.ptt_active:
+                return False
+            self.ptt_active = True
+            return True
+
+    def _end_ptt(self):
+        """Atomically transition out of recording. Returns True only for the
+        call that made the transition, which should fire on_push_to_talk_stop."""
+        with self._state_lock:
+            if not self.ptt_active:
+                return False
+            self.ptt_active = False
+            return True
 
     def _toggle_dictation_press(self):
         # Toggle (continuous dictation) mode on a press-only backend: each press
@@ -186,10 +206,8 @@ class HotkeyManager:
     def _do_ptt_stop(self):
         with self._ptt_timer_lock:
             self._ptt_stop_timer = None
-        if self.ptt_active:
-            self.ptt_active = False
-            if self.on_push_to_talk_stop:
-                self.on_push_to_talk_stop()
+        if self._end_ptt() and self.on_push_to_talk_stop:
+            self.on_push_to_talk_stop()
 
     def update_hotkey_from_string(self, key_string: str, hotkey_type: str = "ptt"):
         if hotkey_type != "ptt" or not self._valid_ptt_key(key_string):
@@ -208,8 +226,17 @@ class HotkeyManager:
         upper = key_string.upper()
         return upper in {f"F{i}" for i in range(1, 13)} | {"SPACE", "TAB", "ENTER", "ESC"} or len(key_string) == 1
 
-    def change_ptt_key(self, key):
-        return self.update_hotkey_from_string(str(getattr(key, "name", key)))
+    @staticmethod
+    def _accel_or_default(value, default):
+        """Coerce a configured accelerator to a usable string.
+
+        A null/number/empty value (from a hand-edited or partially-migrated
+        config) would otherwise reach the accelerator parser, which raises on a
+        non-string. Fall back to the default so a bad config disables nothing.
+        """
+        if isinstance(value, str) and value.strip():
+            return value
+        return default
 
     def set_mode(self, mode: str):
         if mode not in ("push_to_talk", "toggle"):
@@ -218,6 +245,14 @@ class HotkeyManager:
             self.dictation_active = False
             if self.on_toggle_dictation:
                 self.on_toggle_dictation(False)
+        # Symmetric to the above: leaving push-to-talk with a capture in flight
+        # must stop it. Otherwise the in-flight press never gets its matching
+        # release (subsequent ACTIVATED events route to dictation), so ptt_active
+        # stays set, the mic keeps recording until shutdown, and tray health is
+        # pinned at RECORDING.
+        if self.mode == "push_to_talk" and mode == "toggle":
+            self._cancel_ptt_stop_timer()
+            self._do_ptt_stop()
         old = self.mode
         self.mode = mode
         logger.info("[HOTKEY_MANAGER] MODE_CHANGED: from %s to %s", old, mode)

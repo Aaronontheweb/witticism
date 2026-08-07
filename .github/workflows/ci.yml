@@ -65,12 +65,19 @@ jobs:
     - name: Install minimal test dependencies
       run: |
         python -m pip install --upgrade pip
-        # Non-GPU dependencies needed to exercise the platform adapter and
-        # config/CLI tests. pytest runs the pytest-style adapter tests that
-        # `unittest discover` silently skipped, plus the unittest-style tests.
-        pip install pytest dbus-next platformdirs pyperclip pynput
+        # Non-GPU dependencies needed to exercise the platform adapter, config,
+        # CLI, and system-tray tests. PyQt5 lets the tray tests import and run
+        # headless under QT_QPA_PLATFORM=offscreen; numpy is pulled in by the
+        # tray's transcriber import. pytest runs both pytest-style and
+        # unittest-style tests.
+        pip install pytest dbus-next platformdirs pyperclip pynput PyQt5 numpy
 
     - name: Run all unit tests
+      env:
+        # Make the src-layout package importable without relying on a test file's
+        # sys.path side effect, and run Qt headless.
+        PYTHONPATH: src
+        QT_QPA_PLATFORM: offscreen
       run: |
         # pytest natively runs both unittest-style and pytest-style tests.
         python -m pytest tests/ -v
