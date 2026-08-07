@@ -1469,24 +1469,30 @@ def test_set_mode_after_release_debounce_commits_not_discards():
     assert flips == [True]                                       # first toggle NOT swallowed
 
 
-def test_pending_release_not_stranded_by_mode_switch_race():
-    """Simulate the mode-switch race: the armed release is delivered while mode
-    is still push_to_talk. It must be consumed there rather than left armed to
-    swallow the user's first genuine toggle-dictation press."""
+def test_mode_switch_is_atomic_under_state_lock():
+    """set_mode holds _state_lock across the whole transition, so a shortcut
+    event delivered concurrently cannot interleave with the commit/cancel +
+    swallow-arm + mode-flip (the whole class of mode-switch races)."""
     adapter = FakeShortcutAdapter()  # supports_hold True
     manager = HotkeyManager(FakeConfig(), adapter=adapter)
-    flips = []
-    manager.set_callbacks(on_toggle_dictation=lambda active: flips.append(active))
     manager.start()
-    # Intermediate race state: swallow armed, mode not yet flipped.
-    manager._pending_ptt_release = True
-    assert manager.mode == "push_to_talk"
-    adapter.emit("push_to_talk", ShortcutEventType.DEACTIVATED)  # lands in the ptt branch
-    assert manager._pending_ptt_release is False                # consumed, not stranded
-    manager.set_mode("toggle")
-    adapter.emit("push_to_talk", ShortcutEventType.ACTIVATED)
-    adapter.emit("push_to_talk", ShortcutEventType.DEACTIVATED)
-    assert flips == [True]                                       # first toggle works
+    adapter.emit("push_to_talk", ShortcutEventType.ACTIVATED)  # hold begins (key held)
+
+    # A shortcut event arriving mid-set_mode must block on the same lock. Prove
+    # mutual exclusion: while _state_lock is held, the handler cannot run.
+    import threading
+    ran = threading.Event()
+
+    def deliver_release():
+        adapter.emit("push_to_talk", ShortcutEventType.DEACTIVATED)
+        ran.set()
+
+    with manager._state_lock:
+        t = threading.Thread(target=deliver_release, daemon=True)
+        t.start()
+        assert not ran.wait(0.1)  # blocked on the lock, cannot interleave
+    t.join(timeout=1)
+    assert ran.is_set()  # proceeds once the lock is released
 
 
 def test_switch_out_and_back_does_not_strand_swallow():

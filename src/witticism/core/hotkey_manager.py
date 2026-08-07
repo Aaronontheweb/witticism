@@ -43,13 +43,17 @@ class HotkeyManager:
         self.dictation_active = False
         self.ptt_debounce_ms = int(self._configured("hotkeys.ptt_debounce_ms", DEFAULT_PTT_DEBOUNCE_MS))
         self._ptt_stop_timer: Optional[threading.Timer] = None
-        self._ptt_timer_lock = threading.Lock()
-        # Guards ptt_active across the shortcut-event thread (D-Bus/pynput
-        # listener) and the debounce Timer thread, so a fresh press racing a
-        # firing stop-timer cannot corrupt the recording state.
-        self._state_lock = threading.Lock()
-        # Set when a mode switch stops an active hold whose key may still be
-        # physically down; the next push_to_talk release is then swallowed.
+        # One reentrant lock serializes ALL shortcut-state mutation across the
+        # three threads that touch it - the shortcut-event handler (D-Bus/pynput
+        # listener), the debounce Timer, and set_mode (GUI thread) - so a
+        # release, a firing stop-timer, and a mode switch can never interleave.
+        # Reentrant so the transition helpers can re-acquire it under a caller
+        # that already holds it. All of ptt_active, mode, dictation_active,
+        # _pending_ptt_release and _ptt_stop_timer are mutated only under it.
+        self._state_lock = threading.RLock()
+        # Set when a mode switch stops an in-progress hold whose key is still
+        # physically down; the next push_to_talk release is then swallowed so it
+        # does not flip dictation on.
         self._pending_ptt_release = False
         self._last_toggle_press = 0.0
         # Backends that cannot observe key-release (e.g. a GNOME custom
@@ -102,62 +106,62 @@ class HotkeyManager:
 
     def stop(self):
         self._cancel_ptt_stop_timer()
-        if self.ptt_active:
-            self._do_ptt_stop()
+        self._do_ptt_stop()  # no-op if not recording
         self.adapter.stop()
         self.listener = None
         logger.info("[HOTKEY_MANAGER] STOPPED")
 
     def _on_shortcut_event(self, event: ShortcutEvent):
+        # Serialize the whole handler against set_mode and the debounce Timer, so
+        # release / stop-timer / mode-switch can never interleave. The lock is
+        # reentrant, so the transition helpers may re-acquire it.
         try:
-            if event.id == "mode_switch" and event.type == ShortcutEventType.ACTIVATED:
-                if self.on_toggle:
-                    self.on_toggle()
-                return
-            if event.id != "push_to_talk":
-                return
-            if event.type == ShortcutEventType.ACTIVATED:
-                if not self.supports_hold:
-                    # Press-only backend: the ACTIVATED press is the only signal
-                    # we ever get, so drive both modes from it. push_to_talk
-                    # alternates start/stop; toggle flips continuous dictation.
-                    if self.mode == "push_to_talk":
-                        self._toggle_ptt_press()
-                    elif self.mode == "toggle":
-                        self._toggle_dictation_press()
-                    return
-                if self.mode != "push_to_talk":
-                    return
-                self._cancel_ptt_stop_timer()
-                self._begin_ptt()
-                return
-            if event.type != ShortcutEventType.DEACTIVATED:
-                return
-            if not self.supports_hold:
-                # Press-to-toggle backends never emit release events; ignore any.
-                return
-            if self.mode == "push_to_talk":
-                # A real release always ends the capture. The stray-release guard
-                # is intentionally NOT applied here: swallowing a release in
-                # push-to-talk mode could leave the mic stuck recording. If the
-                # mode-switch race delivered the armed release here (mode not yet
-                # flipped), it lands harmlessly (ptt_active already False); consume
-                # the pending-swallow so it cannot strand and eat a later toggle.
-                self._pending_ptt_release = False
-                if self.ptt_active:
-                    self._schedule_ptt_stop() if self.ptt_debounce_ms > 0 else self._do_ptt_stop()
-            elif self.mode == "toggle":
-                if self._pending_ptt_release:
-                    # A leftover release from a hold we already stopped on the
-                    # mode switch (the key was still down). Consume this one so it
-                    # does not flip dictation on. One-shot; cleared here.
-                    self._pending_ptt_release = False
-                    return
-                self.dictation_active = not self.dictation_active
-                if self.on_toggle_dictation:
-                    self.on_toggle_dictation(self.dictation_active)
+            with self._state_lock:
+                self._handle_shortcut_event(event)
         except Exception:
             logger.exception("[HOTKEY_MANAGER] SHORTCUT_EVENT_ERROR")
+
+    def _handle_shortcut_event(self, event: ShortcutEvent):
+        if event.id == "mode_switch" and event.type == ShortcutEventType.ACTIVATED:
+            if self.on_toggle:
+                self.on_toggle()
+            return
+        if event.id != "push_to_talk":
+            return
+        if event.type == ShortcutEventType.ACTIVATED:
+            if not self.supports_hold:
+                # Press-only backend: the ACTIVATED press is the only signal we
+                # ever get, so drive both modes from it. push_to_talk alternates
+                # start/stop; toggle flips continuous dictation.
+                if self.mode == "push_to_talk":
+                    self._toggle_ptt_press()
+                elif self.mode == "toggle":
+                    self._toggle_dictation_press()
+                return
+            if self.mode != "push_to_talk":
+                return
+            self._cancel_ptt_stop_timer()
+            self._begin_ptt()
+            return
+        if event.type != ShortcutEventType.DEACTIVATED:
+            return
+        if not self.supports_hold:
+            # Press-to-toggle backends never emit release events; ignore any.
+            return
+        if self.mode == "push_to_talk":
+            # A real release always ends the capture.
+            if self.ptt_active:
+                self._schedule_ptt_stop() if self.ptt_debounce_ms > 0 else self._do_ptt_stop()
+        elif self.mode == "toggle":
+            if self._pending_ptt_release:
+                # Leftover release from a hold we stopped on the mode switch (the
+                # key was still down). Consume it so it does not flip dictation
+                # on. One-shot; armed and consumed under the same lock.
+                self._pending_ptt_release = False
+                return
+            self.dictation_active = not self.dictation_active
+            if self.on_toggle_dictation:
+                self.on_toggle_dictation(self.dictation_active)
 
     def _press_to_toggle_debounce_ms(self):
         # Press-to-toggle needs a much larger guard than hold-to-talk's release
@@ -240,7 +244,7 @@ class HotkeyManager:
             self.on_toggle_dictation(self.dictation_active)
 
     def _schedule_ptt_stop(self):
-        with self._ptt_timer_lock:
+        with self._state_lock:
             if self._ptt_stop_timer is not None:
                 self._ptt_stop_timer.cancel()
             self._ptt_stop_timer = threading.Timer(self.ptt_debounce_ms / 1000.0, self._do_ptt_stop)
@@ -248,15 +252,18 @@ class HotkeyManager:
             self._ptt_stop_timer.start()
 
     def _cancel_ptt_stop_timer(self):
-        with self._ptt_timer_lock:
+        with self._state_lock:
             if self._ptt_stop_timer is not None:
                 self._ptt_stop_timer.cancel()
                 self._ptt_stop_timer = None
 
     def _do_ptt_stop(self):
-        with self._ptt_timer_lock:
+        # Null the timer AND end the capture atomically, so no other thread can
+        # observe the timer cleared while ptt_active is still True (which would
+        # misread a completed utterance as in-progress and discard it).
+        with self._state_lock:
             self._ptt_stop_timer = None
-        self._end_ptt()
+            self._end_ptt()
 
     def update_hotkey_from_string(self, key_string: str, hotkey_type: str = "ptt"):
         if hotkey_type != "ptt" or not self._valid_ptt_key(key_string):
@@ -290,37 +297,34 @@ class HotkeyManager:
     def set_mode(self, mode: str):
         if mode not in ("push_to_talk", "toggle"):
             raise ValueError(f"Invalid mode: {mode}")
-        if self.mode == "toggle" and mode == "push_to_talk":
-            # The stray-release guard only has meaning in toggle mode; clear it so
-            # it can never strand across a switch back and swallow a real release.
-            self._pending_ptt_release = False
-            if self.dictation_active:
-                self.dictation_active = False
-                if self.on_toggle_dictation:
-                    self.on_toggle_dictation(False)
-        # Symmetric to the above: leaving push-to-talk with a capture in flight
-        # must stop it. Otherwise the in-flight press never gets its matching
-        # release (subsequent ACTIVATED events route to dictation), so ptt_active
-        # stays set, the mic keeps recording until shutdown, and tray health is
-        # pinned at RECORDING.
-        if self.mode == "push_to_talk" and mode == "toggle":
-            # A pending debounce stop-timer means the release already arrived and
-            # the key is physically up, so no further release is coming; only arm
-            # the swallow when the key is genuinely still held.
-            with self._ptt_timer_lock:
+        # Hold the shared lock across the entire transition so a shortcut release
+        # or a firing stop-timer cannot interleave with the commit/cancel
+        # decision, the swallow-arm, and the mode flip - they move as one unit.
+        with self._state_lock:
+            old = self.mode
+            if old == "toggle" and mode == "push_to_talk":
+                # The stray-release guard only has meaning in toggle mode; clear
+                # it so it can never strand across a switch back.
+                self._pending_ptt_release = False
+                if self.dictation_active:
+                    self.dictation_active = False
+                    if self.on_toggle_dictation:
+                        self.on_toggle_dictation(False)
+            elif old == "push_to_talk" and mode == "toggle":
+                # Leaving push-to-talk with a capture in flight must end it, or
+                # the in-flight press never gets its matching release and the mic
+                # records until shutdown. A pending debounce stop-timer means the
+                # key was already released (a COMPLETED utterance waiting out the
+                # debounce) - commit it. Otherwise the key is still held (an
+                # in-progress partial) - discard it and swallow the trailing
+                # release so it does not flip dictation on.
                 release_already_seen = self._ptt_stop_timer is not None
                 if self._ptt_stop_timer is not None:
                     self._ptt_stop_timer.cancel()
                     self._ptt_stop_timer = None
-            if release_already_seen:
-                # The key was already released: this is a COMPLETED utterance
-                # waiting out the debounce window. Commit it (transcribe) rather
-                # than discard - a finished utterance must not be lost.
-                self._end_ptt()
-            elif self._cancel_ptt() and self.supports_hold:
-                # Key still held: an in-progress partial capture. Discard it, and
-                # swallow the trailing release so it does not flip dictation on.
-                self._pending_ptt_release = True
-        old = self.mode
-        self.mode = mode
+                if release_already_seen:
+                    self._end_ptt()
+                elif self._cancel_ptt() and self.supports_hold:
+                    self._pending_ptt_release = True
+            self.mode = mode
         logger.info("[HOTKEY_MANAGER] MODE_CHANGED: from %s to %s", old, mode)
