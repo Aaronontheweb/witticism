@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-07
+
+### 🚀 Feature Release: Wayland Support
+
+Witticism now works on Wayland desktop sessions. Previously the app was silently dead on Wayland — pynput connects to XWayland but never sees keys pressed in native Wayland windows and cannot type into them, so push-to-talk and text output did nothing. Ubuntu 24.04 and other recent distributions default to Wayland, which left affected users staring at a running tray icon that never responded. X11 and Windows are unchanged and continue to use pynput.
+
+### ✨ New Features
+
+#### Wayland Push-to-Talk
+- **Push-to-talk now works on Wayland sessions** - Shortcut capture uses a per-session backend chosen automatically at runtime ([#125](https://github.com/Aaronontheweb/witticism/pull/125), closes [#124](https://github.com/Aaronontheweb/witticism/issues/124))
+- **XDG GlobalShortcuts portal** (KDE, GNOME 48+) provides true hold-to-talk
+- **GNOME 46/47** uses a standard GNOME custom keyboard shortcut, inferring hold-to-talk from the key auto-repeat stream (falls back to press-to-toggle when key repeat is disabled)
+- **Optional GNOME Shell extension** can be installed for exact key-release timing on GNOME Wayland
+- X11 and Windows continue to use pynput with unchanged hold-to-talk behavior
+
+#### Wayland Text Output
+- **Clipboard-first text output on Wayland** with no startup permission prompts - transcribed text is delivered via the clipboard by default ([#125](https://github.com/Aaronontheweb/witticism/pull/125))
+- **Optional automatic typing** via the RemoteDesktop portal is strictly opt-in, gated behind an in-app consent dialog, with a persistent tray status row and a degraded-health tray indicator if a granted session later breaks
+- X11 and Windows continue to type directly via pynput
+
+#### `witticism-platform` CLI
+- **New `witticism-platform` command** for Wayland setup and diagnostics ([#125](https://github.com/Aaronontheweb/witticism/pull/125))
+- `witticism-platform doctor` reports the selected shortcut and text-output backends and the capability tier available on your session
+- `witticism-platform install-gnome-extension` installs the optional GNOME Shell extension behind explicit consent; `install.sh` itself mutates nothing
+
+### 🔧 Fixed
+
+#### Configuration
+- **Automatic config migration** - The legacy `hotkeys.toggle_enable` setting is renamed to `hotkeys.mode_switch` automatically on first load; the migration is idempotent and written atomically, so an interrupted save can no longer truncate your config and reset every setting to defaults ([#125](https://github.com/Aaronontheweb/witticism/pull/125), [#128](https://github.com/Aaronontheweb/witticism/pull/128))
+- **Fixed the microphone sticking on after a mid-recording mode switch** - Switching out of push-to-talk mode during an in-flight capture now stops recording instead of leaving the mic open until shutdown ([#128](https://github.com/Aaronontheweb/witticism/pull/128))
+
+### 📊 Impact
+This release restores Witticism on Wayland, the default session on Ubuntu 24.04 and other current Linux distributions, where push-to-talk and text output previously did nothing. The Wayland adapters shipped alongside extensive hardening — thread-safe hotkey handling, an authenticated D-Bus trigger path, atomic config writes, and a test suite grown to 141 tests ([#125](https://github.com/Aaronontheweb/witticism/pull/125), [#128](https://github.com/Aaronontheweb/witticism/pull/128)). X11 and Windows behavior is unchanged.
+
 ## [0.8.2] - 2026-05-07
 
 ### 🔧 Fixed
@@ -589,7 +623,8 @@ This release completes the foundational observability and recovery systems that 
 - Audio device selection
 - Configuration persistence
 
-[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/v0.8.2...HEAD
+[Unreleased]: https://github.com/Aaronontheweb/witticism/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/Aaronontheweb/witticism/compare/v0.8.2...v0.9.0
 [0.8.2]: https://github.com/Aaronontheweb/witticism/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/Aaronontheweb/witticism/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/Aaronontheweb/witticism/compare/v0.7.3...v0.8.0
