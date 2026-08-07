@@ -1,3 +1,4 @@
+import functools
 import logging
 import threading
 import time
@@ -218,19 +219,15 @@ class HotkeyManager:
                 self.on_push_to_talk_stop()
             return True
 
-    def _cancel_ptt(self):
-        """Abandon an in-flight capture (mode switch): clear ptt_active and fire
-        on_push_to_talk_cancel so the buffered audio is dropped, not transcribed.
-        Falls back to on_push_to_talk_stop only if no cancel handler is wired.
-        Returns True only for the call that made the transition."""
+    def _flip_ptt_off(self):
+        """Flip ptt_active to False under the lock and report whether this call
+        made the transition. Fires no callback: set_mode runs the commit/cancel
+        callback AFTER releasing the lock, so blocking teardown never stalls the
+        listener/Timer threads waiting on the lock."""
         with self._state_lock:
             if not self.ptt_active:
                 return False
             self.ptt_active = False
-            if self.on_push_to_talk_cancel:
-                self.on_push_to_talk_cancel()
-            elif self.on_push_to_talk_stop:
-                self.on_push_to_talk_stop()
             return True
 
     def _toggle_dictation_press(self):
@@ -297,9 +294,13 @@ class HotkeyManager:
     def set_mode(self, mode: str):
         if mode not in ("push_to_talk", "toggle"):
             raise ValueError(f"Invalid mode: {mode}")
-        # Hold the shared lock across the entire transition so a shortcut release
-        # or a firing stop-timer cannot interleave with the commit/cancel
-        # decision, the swallow-arm, and the mode flip - they move as one unit.
+        # Decide + flip the state under the lock so a shortcut release or a
+        # firing stop-timer cannot interleave with the commit/cancel decision,
+        # the swallow-arm, and the mode flip - they move as one unit. But run the
+        # resulting callback (which, on the GUI thread, synchronously tears down
+        # audio and joins worker threads) AFTER releasing the lock, so the lock
+        # is never held across blocking teardown.
+        deferred = None
         with self._state_lock:
             old = self.mode
             if old == "toggle" and mode == "push_to_talk":
@@ -309,7 +310,7 @@ class HotkeyManager:
                 if self.dictation_active:
                     self.dictation_active = False
                     if self.on_toggle_dictation:
-                        self.on_toggle_dictation(False)
+                        deferred = functools.partial(self.on_toggle_dictation, False)
             elif old == "push_to_talk" and mode == "toggle":
                 # Leaving push-to-talk with a capture in flight must end it, or
                 # the in-flight press never gets its matching release and the mic
@@ -322,9 +323,14 @@ class HotkeyManager:
                 if self._ptt_stop_timer is not None:
                     self._ptt_stop_timer.cancel()
                     self._ptt_stop_timer = None
-                if release_already_seen:
-                    self._end_ptt()
-                elif self._cancel_ptt() and self.supports_hold:
-                    self._pending_ptt_release = True
+                if self._flip_ptt_off():
+                    if release_already_seen:
+                        deferred = self.on_push_to_talk_stop        # commit (transcribe)
+                    else:
+                        if self.supports_hold:
+                            self._pending_ptt_release = True
+                        deferred = self.on_push_to_talk_cancel or self.on_push_to_talk_stop
             self.mode = mode
+        if deferred:
+            deferred()
         logger.info("[HOTKEY_MANAGER] MODE_CHANGED: from %s to %s", old, mode)

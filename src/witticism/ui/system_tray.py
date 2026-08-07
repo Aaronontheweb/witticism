@@ -11,6 +11,7 @@ from witticism.ui.settings_dialog import SettingsDialog
 from witticism.ui.cuda_health_dialog import CudaHealthDialog
 from witticism.ui.autopaste_prompt import AutopasteConsent, show_priming_dialog
 from witticism.ui.tray_health import TrayHealth, compute_tray_health
+from witticism.utils.config_manager import is_usable_accelerator
 
 logger = logging.getLogger(__name__)
 
@@ -717,13 +718,26 @@ class SystemTrayApp(QSystemTrayIcon):
             self.cancel_loading_action.setVisible(False)
 
     def _ptt_key_label(self):
-        """Upper-cased push-to-talk key for display, tolerating a non-string or
-        empty configured value (from a hand-edited or partially-migrated config)
-        so building a menu label never raises."""
+        """Upper-cased push-to-talk key for display, tolerating a non-usable
+        configured value (from a hand-edited or partially-migrated config) so
+        building a menu label never raises. Uses the same usability rule as the
+        hotkey manager (is_usable_accelerator) so display and active key agree."""
         key = self.config_manager.get("hotkeys.push_to_talk", "F9") if self.config_manager else "F9"
-        if not isinstance(key, str) or not key.strip():
+        if not is_usable_accelerator(key):
             key = "F9"
         return key.upper()
+
+    def _set_ptt_action_text(self, mode, ptt_key=None):
+        """Set the PTT menu action label for ``mode``. Single source for the
+        label wording (used by change_mode, set_components and settings). Pass
+        ``ptt_key`` to use a specific key string; otherwise the configured key
+        is read via _ptt_key_label()."""
+        if ptt_key is None:
+            ptt_key = self._ptt_key_label()
+        if mode == "push_to_talk":
+            self.ptt_action.setText(f"Push-to-Talk (Hold {ptt_key})")
+        else:
+            self.ptt_action.setText(f"Toggle Dictation (Press {ptt_key})")
 
     def change_mode(self, mode: str):
         """Switch between push-to-talk and toggle modes"""
@@ -741,12 +755,7 @@ class SystemTrayApp(QSystemTrayIcon):
             self.hotkey_manager.set_mode(mode)
 
         # Update PTT action text
-        ptt_key = self._ptt_key_label()
-
-        if mode == "push_to_talk":
-            self.ptt_action.setText(f"Push-to-Talk (Hold {ptt_key})")
-        else:
-            self.ptt_action.setText(f"Toggle Dictation (Press {ptt_key})")
+        self._set_ptt_action_text(mode)
 
         # Stop any ongoing dictation if switching away from toggle mode
         if mode == "push_to_talk" and self.is_dictating:
@@ -998,12 +1007,8 @@ class SystemTrayApp(QSystemTrayIcon):
             key_str = settings["hotkeys.push_to_talk"]
             if key_str and self.hotkey_manager.update_hotkey_from_string(key_str, "ptt"):
                 actually_changed = True
-                # Update menu text with new hotkey
-                ptt_key = key_str.upper()
-                if self.mode == "push_to_talk":
-                    self.ptt_action.setText(f"Push-to-Talk (Hold {ptt_key})")
-                else:
-                    self.ptt_action.setText(f"Toggle Dictation (Press {ptt_key})")
+                # Update menu text with the just-set hotkey (already validated).
+                self._set_ptt_action_text(self.mode, key_str.upper())
             # A rebind updates hotkey_manager.status; re-render health so a
             # failed rebind (unusable adapter) shows the degraded icon.
             self.refresh_health()
@@ -1136,11 +1141,7 @@ class SystemTrayApp(QSystemTrayIcon):
 
         # Update PTT action text with actual configured hotkey
         if self.config_manager:
-            ptt_key = self._ptt_key_label()
-            if self.mode == "push_to_talk":
-                self.ptt_action.setText(f"Push-to-Talk (Hold {ptt_key})")
-            else:
-                self.ptt_action.setText(f"Toggle Dictation (Press {ptt_key})")
+            self._set_ptt_action_text(self.mode)
 
         # Update device menu now that we have audio_capture
         self.update_device_menu()
