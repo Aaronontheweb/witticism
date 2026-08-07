@@ -1443,23 +1443,50 @@ def test_ptt_transition_callbacks_fire_once_under_lock():
     assert events == ["start", "stop"]
 
 
-def test_set_mode_does_not_arm_swallow_after_release_debounce():
-    """If the PTT key was already released (a debounce stop is pending) when the
-    user switches to toggle, no trailing release is coming, so the swallow must
-    NOT be armed - otherwise the first real toggle press would be eaten."""
+def test_set_mode_after_release_debounce_commits_not_discards():
+    """If the key was already released (a completed utterance is waiting out the
+    debounce) when the user switches to toggle, that finished utterance is
+    committed (transcribed), NOT discarded, and no swallow is armed."""
     adapter = FakeShortcutAdapter()  # supports_hold True
     manager = HotkeyManager(DebounceConfig(1000), adapter=adapter)
+    events = []
     flips = []
-    manager.set_callbacks(on_toggle_dictation=lambda active: flips.append(active))
+    manager.set_callbacks(
+        on_push_to_talk_start=lambda: events.append("start"),
+        on_push_to_talk_stop=lambda: events.append("stop"),
+        on_push_to_talk_cancel=lambda: events.append("cancel"),
+        on_toggle_dictation=lambda active: flips.append(active),
+    )
     manager.start()
     adapter.emit("push_to_talk", ShortcutEventType.ACTIVATED)    # hold begins
     adapter.emit("push_to_talk", ShortcutEventType.DEACTIVATED)  # release -> debounce stop scheduled
     assert manager.ptt_active is True                            # still within debounce window
     manager.set_mode("toggle")                                  # release already seen
+    assert events == ["start", "stop"]                          # committed, not "cancel"
     assert manager._pending_ptt_release is False
     adapter.emit("push_to_talk", ShortcutEventType.ACTIVATED)
     adapter.emit("push_to_talk", ShortcutEventType.DEACTIVATED)
     assert flips == [True]                                       # first toggle NOT swallowed
+
+
+def test_pending_release_not_stranded_by_mode_switch_race():
+    """Simulate the mode-switch race: the armed release is delivered while mode
+    is still push_to_talk. It must be consumed there rather than left armed to
+    swallow the user's first genuine toggle-dictation press."""
+    adapter = FakeShortcutAdapter()  # supports_hold True
+    manager = HotkeyManager(FakeConfig(), adapter=adapter)
+    flips = []
+    manager.set_callbacks(on_toggle_dictation=lambda active: flips.append(active))
+    manager.start()
+    # Intermediate race state: swallow armed, mode not yet flipped.
+    manager._pending_ptt_release = True
+    assert manager.mode == "push_to_talk"
+    adapter.emit("push_to_talk", ShortcutEventType.DEACTIVATED)  # lands in the ptt branch
+    assert manager._pending_ptt_release is False                # consumed, not stranded
+    manager.set_mode("toggle")
+    adapter.emit("push_to_talk", ShortcutEventType.ACTIVATED)
+    adapter.emit("push_to_talk", ShortcutEventType.DEACTIVATED)
+    assert flips == [True]                                       # first toggle works
 
 
 def test_switch_out_and_back_does_not_strand_swallow():

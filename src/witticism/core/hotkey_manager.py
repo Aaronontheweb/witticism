@@ -139,7 +139,11 @@ class HotkeyManager:
             if self.mode == "push_to_talk":
                 # A real release always ends the capture. The stray-release guard
                 # is intentionally NOT applied here: swallowing a release in
-                # push-to-talk mode could leave the mic stuck recording.
+                # push-to-talk mode could leave the mic stuck recording. If the
+                # mode-switch race delivered the armed release here (mode not yet
+                # flipped), it lands harmlessly (ptt_active already False); consume
+                # the pending-swallow so it cannot strand and eat a later toggle.
+                self._pending_ptt_release = False
                 if self.ptt_active:
                     self._schedule_ptt_stop() if self.ptt_debounce_ms > 0 else self._do_ptt_stop()
             elif self.mode == "toggle":
@@ -308,9 +312,14 @@ class HotkeyManager:
                 if self._ptt_stop_timer is not None:
                     self._ptt_stop_timer.cancel()
                     self._ptt_stop_timer = None
-            # Cancel (discard) rather than stop (transcribe): a mode switch is not
-            # a finished utterance, so the partial capture is dropped.
-            if self._cancel_ptt() and self.supports_hold and not release_already_seen:
+            if release_already_seen:
+                # The key was already released: this is a COMPLETED utterance
+                # waiting out the debounce window. Commit it (transcribe) rather
+                # than discard - a finished utterance must not be lost.
+                self._end_ptt()
+            elif self._cancel_ptt() and self.supports_hold:
+                # Key still held: an in-progress partial capture. Discard it, and
+                # swallow the trailing release so it does not flip dictation on.
                 self._pending_ptt_release = True
         old = self.mode
         self.mode = mode
