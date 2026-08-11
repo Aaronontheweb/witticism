@@ -1,6 +1,7 @@
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-                             QComboBox, QSlider, QPlainTextEdit,
-                             QGroupBox, QFormLayout, QDialogButtonBox, QDoubleSpinBox)
+                             QComboBox, QSlider, QPlainTextEdit, QWidget,
+                             QTabWidget, QGroupBox, QFormLayout, QDialogButtonBox,
+                             QDoubleSpinBox)
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QKeySequence
 from witticism.ui.icon_utils import create_witticism_icon
@@ -22,7 +23,30 @@ class SettingsDialog(QDialog):
     def init_ui(self):
         layout = QVBoxLayout()
 
-        # Hotkey Settings
+        tabs = QTabWidget()
+        tabs.addTab(self._build_general_tab(), "General")
+        tabs.addTab(self._build_audio_tab(), "Audio")
+        tabs.addTab(self._build_transcription_tab(), "Transcription")
+        tabs.addTab(self._build_vocabulary_tab(), "Vocabulary")
+        tabs.addTab(self._build_compute_tab(), "Compute")
+        layout.addWidget(tabs)
+
+        # Buttons
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel | QDialogButtonBox.RestoreDefaults,
+            Qt.Horizontal, self
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        buttons.button(QDialogButtonBox.RestoreDefaults).clicked.connect(self.restore_defaults)
+
+        layout.addWidget(buttons)
+        self.setLayout(layout)
+
+    def _build_general_tab(self):
+        page = QWidget()
+        v = QVBoxLayout(page)
+
         hotkey_group = QGroupBox("Keyboard Shortcuts")
         hotkey_layout = QFormLayout()
 
@@ -33,9 +57,14 @@ class SettingsDialog(QDialog):
         hotkey_layout.addRow("Switch Mode:", self.mode_switch_edit)
 
         hotkey_group.setLayout(hotkey_layout)
-        layout.addWidget(hotkey_group)
+        v.addWidget(hotkey_group)
+        v.addStretch()
+        return page
 
-        # Audio Settings
+    def _build_audio_tab(self):
+        page = QWidget()
+        v = QVBoxLayout(page)
+
         audio_group = QGroupBox("Audio Settings")
         audio_layout = QFormLayout()
 
@@ -61,9 +90,14 @@ class SettingsDialog(QDialog):
         audio_layout.addRow("Sample Rate (Hz):", self.sample_rate_combo)
 
         audio_group.setLayout(audio_layout)
-        layout.addWidget(audio_group)
+        v.addWidget(audio_group)
+        v.addStretch()
+        return page
 
-        # Transcription Settings
+    def _build_transcription_tab(self):
+        page = QWidget()
+        v = QVBoxLayout(page)
+
         trans_group = QGroupBox("Transcription Settings")
         trans_layout = QFormLayout()
 
@@ -82,19 +116,6 @@ class SettingsDialog(QDialog):
             "zh - Chinese"
         ])
         trans_layout.addRow("Language:", self.language_combo)
-
-        # Custom vocabulary (Whisper hotwords). A short list of proper nouns /
-        # jargon that biases transcription toward the correct spelling of names
-        # and technical terms Whisper otherwise gets wrong.
-        self.vocabulary_edit = QPlainTextEdit()
-        self.vocabulary_edit.setPlaceholderText(
-            "Comma-separated names and jargon, e.g. Akka.NET, Petabridge, Phobos, Aaron Stannard"
-        )
-        self.vocabulary_edit.setFixedHeight(70)
-        trans_layout.addRow("Custom Vocabulary:", self.vocabulary_edit)
-        trans_layout.addRow("", QLabel(
-            "Terms Whisper often misspells (names, acronyms). Keep it short (~50 words max)."
-        ))
 
         # Chunk duration for dictation mode
         self.chunk_duration_spin = QDoubleSpinBox()
@@ -120,9 +141,47 @@ class SettingsDialog(QDialog):
         trans_layout.addRow("Max Audio Length:", self.max_audio_spin)
 
         trans_group.setLayout(trans_layout)
-        layout.addWidget(trans_group)
+        v.addWidget(trans_group)
+        v.addStretch()
+        return page
 
-        # Compute Settings
+    def _build_vocabulary_tab(self):
+        page = QWidget()
+        v = QVBoxLayout(page)
+
+        title = QLabel("Custom Vocabulary")
+        title_font = title.font()
+        title_font.setBold(True)
+        title.setFont(title_font)
+        v.addWidget(title)
+
+        help_label = QLabel(
+            "Proper nouns, product names, and technical jargon Whisper should "
+            "expect and prefer when it's unsure. Enter one term per line or "
+            "separate them with commas. This biases spelling toward these terms "
+            "— it's a strong hint, not a guarantee — so list the ones "
+            "you use most (roughly 50 terms fit)."
+        )
+        help_label.setWordWrap(True)
+        v.addWidget(help_label)
+
+        # The editor fills the remaining vertical space (stretch factor 1) so it
+        # grows with the dialog and gives plenty of room for long lists.
+        self.vocabulary_edit = QPlainTextEdit()
+        self.vocabulary_edit.setPlaceholderText(
+            "Akka.NET\nPetabridge\nPhobos\nAaron Stannard"
+        )
+        self.vocabulary_edit.textChanged.connect(self._update_vocabulary_count)
+        v.addWidget(self.vocabulary_edit, 1)
+
+        self.vocabulary_count_label = QLabel("")
+        v.addWidget(self.vocabulary_count_label)
+        return page
+
+    def _build_compute_tab(self):
+        page = QWidget()
+        v = QVBoxLayout(page)
+
         compute_group = QGroupBox("Compute Settings")
         compute_layout = QFormLayout()
 
@@ -131,21 +190,26 @@ class SettingsDialog(QDialog):
         compute_layout.addRow("Compute Type:", self.compute_type_combo)
 
         compute_group.setLayout(compute_layout)
-        layout.addWidget(compute_group)
+        v.addWidget(compute_group)
+        v.addStretch()
+        return page
 
-        layout.addStretch()
+    @staticmethod
+    def _parse_vocabulary(text):
+        """Split free-form vocabulary text (commas and/or newlines) into a
+        clean list of terms, dropping blanks and surrounding whitespace."""
+        terms = []
+        for chunk in text.replace("\n", ",").split(","):
+            term = chunk.strip()
+            if term:
+                terms.append(term)
+        return terms
 
-        # Buttons
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.Ok | QDialogButtonBox.Cancel | QDialogButtonBox.RestoreDefaults,
-            Qt.Horizontal, self
-        )
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        buttons.button(QDialogButtonBox.RestoreDefaults).clicked.connect(self.restore_defaults)
-
-        layout.addWidget(buttons)
-        self.setLayout(layout)
+    def _update_vocabulary_count(self):
+        count = len(self._parse_vocabulary(self.vocabulary_edit.toPlainText()))
+        suffix = "" if count == 1 else "s"
+        hint = "" if count <= 50 else "  — consider trimming; only ~50 terms fit"
+        self.vocabulary_count_label.setText(f"{count} term{suffix}{hint}")
 
     def load_current_settings(self):
         """Load current settings from config manager"""
@@ -170,6 +234,7 @@ class SettingsDialog(QDialog):
                 self.language_combo.setCurrentIndex(i)
                 break
 
+        # Vocabulary (textChanged updates the term count automatically)
         self.vocabulary_edit.setPlainText(self.config_manager.get("model.hotwords", ""))
 
         chunk_duration = self.config_manager.get("dictation.chunk_duration", 2.0)
@@ -208,7 +273,9 @@ class SettingsDialog(QDialog):
             "audio.vad_aggressiveness": self.vad_slider.value(),
             "audio.sample_rate": int(self.sample_rate_combo.currentText()),
             "model.language": language_code,
-            "model.hotwords": self.vocabulary_edit.toPlainText().strip(),
+            "model.hotwords": ", ".join(
+                self._parse_vocabulary(self.vocabulary_edit.toPlainText())
+            ),
             "dictation.chunk_duration": self.chunk_duration_spin.value(),
             "pipeline.min_audio_length": self.min_audio_spin.value(),
             "pipeline.max_audio_length": self.max_audio_spin.value(),
