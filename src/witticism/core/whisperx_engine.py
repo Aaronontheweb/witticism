@@ -58,12 +58,17 @@ class WhisperXEngine:
         compute_type: Optional[str] = None,
         language: str = "en",
         enable_diarization: bool = False,
-        hf_token: Optional[str] = None
+        hf_token: Optional[str] = None,
+        hotwords: str = ""
     ):
         self.model_size = model_size
         self.language = language
         self.enable_diarization = enable_diarization
         self.hf_token = hf_token
+        # Custom vocabulary (proper nouns / jargon) biased at transcription time
+        # via Whisper "hotwords". This is a load-time option in WhisperX, so
+        # changing it requires a model reload (see on_settings_changed).
+        self.hotwords = hotwords or ""
         self.cuda_fallback = False  # Track if we've fallen back from CUDA error
         self.original_device_setting = device  # Store original user setting (could be "auto", "cuda", "cpu")
 
@@ -108,7 +113,18 @@ class WhisperXEngine:
         # Startup CUDA health tracking
         self.startup_cuda_fixed = False
 
-        logger.info(f"[WHISPERX_ENGINE] INIT: device={self.device}, compute_type={self.compute_type}, model_size={self.model_size}, language={self.language}")
+        logger.info(f"[WHISPERX_ENGINE] INIT: device={self.device}, compute_type={self.compute_type}, model_size={self.model_size}, language={self.language}, hotwords={'set' if self.hotwords.strip() else 'none'}")
+
+    def _asr_options(self) -> Optional[Dict[str, Any]]:
+        """Build faster-whisper decode options for whisperx.load_model().
+
+        Currently only carries the custom-vocabulary hotwords list. Returns
+        None when unset so WhisperX keeps its own defaults.
+        """
+        hotwords = (self.hotwords or "").strip()
+        if not hotwords:
+            return None
+        return {"hotwords": hotwords}
 
     def validate_and_clean_cuda_at_startup(self) -> bool:
         """Validate CUDA health at startup and perform nuclear cleanup if corrupted.
@@ -250,7 +266,8 @@ class WhisperXEngine:
                 self.model_size,
                 self.device,
                 compute_type=self.compute_type,
-                language=self.language
+                language=self.language,
+                asr_options=self._asr_options()
             )
             load_time = time.time() - start_time
             logger.info(f"[WHISPERX_ENGINE] MODEL_LOADED: transcription model loaded in {load_time:.2f}s")
@@ -321,7 +338,8 @@ class WhisperXEngine:
                             self.model_size,
                             self.device,
                             compute_type=self.compute_type,
-                            language=self.language
+                            language=self.language,
+                            asr_options=self._asr_options()
                         )
                         cpu_load_time = time.time() - start_time
                         logger.info(f"[WHISPERX_ENGINE] CPU_RETRY_SUCCESS: transcription model loaded in {cpu_load_time:.2f}s")
@@ -843,7 +861,8 @@ class WhisperXEngine:
                     suspend_state['model_size'],
                     suspend_state['device'],
                     compute_type=suspend_state['compute_type'],
-                    language=suspend_state['language']
+                    language=suspend_state['language'],
+                    asr_options=self._asr_options()
                 )
 
                 # Verify model loaded successfully

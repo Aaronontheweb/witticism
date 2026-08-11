@@ -983,6 +983,15 @@ class SystemTrayApp(QSystemTrayIcon):
                 self.engine.language = settings["model.language"]
                 actually_changed = True
 
+        # Update custom vocabulary (hotwords). This is a load-time option in
+        # WhisperX, so reload the current model to apply it immediately.
+        if "model.hotwords" in settings and self.engine:
+            if self.engine.hotwords != settings["model.hotwords"]:
+                self.engine.hotwords = settings["model.hotwords"]
+                actually_changed = True
+                if self.engine.model is not None:
+                    self.change_model(self.engine.model_size)
+
         # Update chunk duration for dictation (can reload)
         if "dictation.chunk_duration" in settings and self.continuous_capture:
             if self.continuous_capture.chunk_duration != settings["dictation.chunk_duration"]:

@@ -1,5 +1,5 @@
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-                             QComboBox, QSlider,
+                             QComboBox, QSlider, QPlainTextEdit,
                              QGroupBox, QFormLayout, QDialogButtonBox, QDoubleSpinBox)
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QKeySequence
@@ -83,6 +83,19 @@ class SettingsDialog(QDialog):
         ])
         trans_layout.addRow("Language:", self.language_combo)
 
+        # Custom vocabulary (Whisper hotwords). A short list of proper nouns /
+        # jargon that biases transcription toward the correct spelling of names
+        # and technical terms Whisper otherwise gets wrong.
+        self.vocabulary_edit = QPlainTextEdit()
+        self.vocabulary_edit.setPlaceholderText(
+            "Comma-separated names and jargon, e.g. Akka.NET, Petabridge, Phobos, Aaron Stannard"
+        )
+        self.vocabulary_edit.setFixedHeight(70)
+        trans_layout.addRow("Custom Vocabulary:", self.vocabulary_edit)
+        trans_layout.addRow("", QLabel(
+            "Terms Whisper often misspells (names, acronyms). Keep it short (~50 words max)."
+        ))
+
         # Chunk duration for dictation mode
         self.chunk_duration_spin = QDoubleSpinBox()
         self.chunk_duration_spin.setRange(0.5, 5.0)
@@ -157,6 +170,8 @@ class SettingsDialog(QDialog):
                 self.language_combo.setCurrentIndex(i)
                 break
 
+        self.vocabulary_edit.setPlainText(self.config_manager.get("model.hotwords", ""))
+
         chunk_duration = self.config_manager.get("dictation.chunk_duration", 2.0)
         self.chunk_duration_spin.setValue(chunk_duration)
 
@@ -177,6 +192,7 @@ class SettingsDialog(QDialog):
         self.vad_slider.setValue(2)
         self.sample_rate_combo.setCurrentText("16000")
         self.language_combo.setCurrentIndex(0)  # English
+        self.vocabulary_edit.setPlainText("")
         self.chunk_duration_spin.setValue(2.0)
         self.min_audio_spin.setValue(0.5)
         self.max_audio_spin.setValue(30.0)
@@ -192,6 +208,7 @@ class SettingsDialog(QDialog):
             "audio.vad_aggressiveness": self.vad_slider.value(),
             "audio.sample_rate": int(self.sample_rate_combo.currentText()),
             "model.language": language_code,
+            "model.hotwords": self.vocabulary_edit.toPlainText().strip(),
             "dictation.chunk_duration": self.chunk_duration_spin.value(),
             "pipeline.min_audio_length": self.min_audio_spin.value(),
             "pipeline.max_audio_length": self.max_audio_spin.value(),

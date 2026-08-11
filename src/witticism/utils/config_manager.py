@@ -42,7 +42,11 @@ class ConfigManager:
                 "language": "en",
                 "device": "auto",
                 "compute_type": "auto",
-                "enable_diarization": False
+                "enable_diarization": False,
+                # Custom vocabulary: a list of proper nouns / jargon fed to
+                # Whisper as "hotwords" so it biases transcription toward the
+                # correct spelling of names and technical terms. Empty = default.
+                "hotwords": ""
             },
             "audio": {
                 "device_index": None,

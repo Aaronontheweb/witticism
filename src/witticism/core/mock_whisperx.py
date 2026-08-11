@@ -49,7 +49,10 @@ class MockWhisperXModel:
         }
 
 
-def load_model(model_size: str, device: str, compute_type: str = "int8", language: str = "en") -> MockWhisperXModel:
+def load_model(model_size: str, device: str, compute_type: str = "int8", language: str = "en",
+               asr_options: Any = None, **kwargs) -> MockWhisperXModel:
+    # asr_options (initial_prompt, hotwords, etc.) mirror the real whisperx
+    # signature; the mock accepts and ignores them.
     return MockWhisperXModel(model_size, device, compute_type, language)
 
 
