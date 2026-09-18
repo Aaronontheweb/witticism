@@ -462,24 +462,19 @@ if ($DryRun) {
     $startupFolder = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::Startup)
     Write-Host "Windows Startup folder: $startupFolder" -ForegroundColor Gray
     Write-Host "Startup folder exists: $(Test-Path $startupFolder)" -ForegroundColor Gray
-    
-    $startupScript = Join-Path $startupFolder "WitticismAutoStart.ps1"
-    $vbsScript = Join-Path $startupFolder "WitticismAutoStart.vbs"
-    
-    Write-Host "Would create PowerShell script: $startupScript" -ForegroundColor Gray
-    Write-Host "Would create VBS wrapper: $vbsScript" -ForegroundColor Gray
-    
-    # Show what the auto-start content would be using the same execution info
-    Write-Host "PowerShell auto-start content would be:" -ForegroundColor Gray
-    if ($execInfo.Arguments) {
-        $argParts = $execInfo.Arguments.Split(' ')
-        $quotedArgs = $argParts | ForEach-Object { "`"$_`"" }
-        $argString = $quotedArgs -join ', '
-        Write-Host "  Start-Process -FilePath `"$($execInfo.TargetPath)`" -ArgumentList $argString -WindowStyle Hidden" -ForegroundColor Yellow
+
+    $shortcutPath = Join-Path $startupFolder "Witticism.lnk"
+
+    Write-Host "Would create Startup shortcut: $shortcutPath" -ForegroundColor Gray
+    Write-Host "  Target: $($execInfo.TargetPath)" -ForegroundColor Gray
+    Write-Host "  Arguments: $($execInfo.Arguments)" -ForegroundColor Gray
+    Write-Host "  WindowStyle: minimized (7)" -ForegroundColor Gray
+    if ($execInfo.UsesConsole) {
+        Write-Host "  Note: a console target may show a minimized window at login" -ForegroundColor Yellow
     } else {
-        Write-Host "  Start-Process -FilePath `"$($execInfo.TargetPath)`" -WindowStyle Hidden" -ForegroundColor Yellow
+        Write-Host "  No console window (non-console target)" -ForegroundColor Green
     }
-    
+
     Write-Host ""
     Write-Host "DRY RUN COMPLETE - No changes were made" -ForegroundColor Green
     Write-Host "NOTE: This dry run uses the EXACT same functions as real installation" -ForegroundColor Cyan
@@ -576,19 +571,18 @@ function Remove-ExistingWitticism {
                 Write-Host "   [OK] Removed desktop shortcut" -ForegroundColor Green
             }
             
-            # Remove startup files
+            # Remove startup files (new .LNK shortcut, plus legacy .ps1/.vbs
+            # from installs that created them)
             $startupFolder = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::Startup)
+            $startupShortcut = Join-Path $startupFolder "Witticism.lnk"
             $startupScript = Join-Path $startupFolder "WitticismAutoStart.ps1"
             $vbsScript = Join-Path $startupFolder "WitticismAutoStart.vbs"
-            
-            if (Test-Path $startupScript) {
-                Remove-Item $startupScript -Force -ErrorAction SilentlyContinue
-                Write-Host "   [OK] Removed startup PowerShell script" -ForegroundColor Green
-            }
-            
-            if (Test-Path $vbsScript) {
-                Remove-Item $vbsScript -Force -ErrorAction SilentlyContinue
-                Write-Host "   [OK] Removed startup VBS script" -ForegroundColor Green
+
+            foreach ($p in @($startupShortcut, $startupScript, $vbsScript)) {
+                if (Test-Path $p) {
+                    Remove-Item $p -Force -ErrorAction SilentlyContinue
+                    Write-Host "   [OK] Removed startup file: $(Split-Path $p -Leaf)" -ForegroundColor Green
+                }
             }
         }
         
@@ -804,49 +798,43 @@ if (-not $SkipAutoStart) {
     Write-Host "Setting up auto-start..." -ForegroundColor Blue
     
     try {
-        # Create a PowerShell script for auto-start (more reliable than batch)
+        # Auto-start via a Startup-folder shortcut (.LNK). This is the standard,
+        # non-sketchy way Windows apps start on login, and it runs silently
+        # without needing a .VBS wrapper (which antivirus tools often flag).
         $startupFolder = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::Startup)
-        $startupScript = Join-Path $startupFolder "WitticismAutoStart.ps1"
-        
+        $shortcutPath = Join-Path $startupFolder "Witticism.lnk"
+
+        # Remove any legacy WitticismAutoStart.ps1/.vbs from older installs so
+        # the old VBS (which reads as malware) stops running on every login.
+        foreach ($legacy in @("WitticismAutoStart.ps1", "WitticismAutoStart.vbs")) {
+            $legacyPath = Join-Path $startupFolder $legacy
+            if (Test-Path $legacyPath) {
+                Remove-Item $legacyPath -Force -ErrorAction SilentlyContinue
+                Write-Host "   Removed legacy startup file: $legacy" -ForegroundColor Gray
+            }
+        }
+
         # Use the same execution detection logic as desktop shortcut
         $execInfo = Get-WitticismExecutionInfo -pythonPath $python312Path -isPipInstall $isPipInstall -verbose $true
-        
-        # Generate startup script content
-        if ($execInfo.Arguments) {
-            $argParts = $execInfo.Arguments.Split(' ')
-            $quotedArgs = $argParts | ForEach-Object { "`"$_`"" }
-            $argString = $quotedArgs -join ', '
-            $startupContent = @"
-# Witticism Auto-Start Script
-Start-Process -FilePath `"$($execInfo.TargetPath)`" -ArgumentList $argString -WindowStyle Hidden
-"@
-        } else {
-            $startupContent = @"
-# Witticism Auto-Start Script
-Start-Process -FilePath `"$($execInfo.TargetPath)`" -WindowStyle Hidden
-"@
-        }
-        
+
+        $WScriptShell = New-Object -ComObject WScript.Shell
+        $startupShortcut = $WScriptShell.CreateShortcut($shortcutPath)
+        $startupShortcut.TargetPath = $execInfo.TargetPath
+        if ($execInfo.Arguments) { $startupShortcut.Arguments = $execInfo.Arguments }
+        $startupShortcut.WindowStyle = 7  # 7 = minimized; hides the console window
+        $startupShortcut.Description = "Witticism - Voice Transcription Assistant (F9 to record)"
+        $startupShortcut.WorkingDirectory = $env:USERPROFILE
+        $startupShortcut.Save()
+
         if ($execInfo.UsesConsole) {
-            Write-Host "   Warning: May show console window during startup" -ForegroundColor Yellow
+            Write-Host "   Warning: Startup may show a minimized console window" -ForegroundColor Yellow
         } else {
             Write-Host "   Auto-start will run silently (no console window)" -ForegroundColor Green
         }
-        
-        # Write the PowerShell script
-        Set-Content -Path $startupScript -Value $startupContent -Encoding UTF8
-        
-        # Also create a VBS script to run PowerShell silently (no console window)
-        $vbsScript = Join-Path $startupFolder "WitticismAutoStart.vbs"
-        $vbsContent = @"
-Set objShell = CreateObject("WScript.Shell")
-objShell.Run "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$startupScript`"", 0, False
-"@
-        Set-Content -Path $vbsScript -Value $vbsContent -Encoding UTF8
-        
+
         Write-Host "SUCCESS: Auto-start configured" -ForegroundColor Green
         Write-Host "   Witticism will start automatically on Windows login" -ForegroundColor Green
-        Write-Host "   Files created: WitticismAutoStart.vbs, WitticismAutoStart.ps1" -ForegroundColor Gray
+        Write-Host "   Startup shortcut: Witticism.lnk" -ForegroundColor Gray
     } catch {
         Write-Host "WARNING: Could not set up auto-start: $($_.Exception.Message)" -ForegroundColor Yellow
         Write-Host "   You can manually add Witticism to your startup programs:" -ForegroundColor Yellow
@@ -867,7 +855,7 @@ try {
     $execInfo = Get-WitticismExecutionInfo -pythonPath $python312Path -isPipInstall $isPipInstall -verbose $true
     
     $shortcut.TargetPath = $execInfo.TargetPath
-    $shortcut.Arguments = $execInfo.Arguments
+    if ($execInfo.Arguments) { $shortcut.Arguments = $execInfo.Arguments }
     
     if ($execInfo.UsesConsole) {
         Write-Host "   Desktop shortcut: $($execInfo.Description) (may show console)" -ForegroundColor Yellow
@@ -985,7 +973,7 @@ if (-not $SkipAutoStart) {
     Write-Host "Auto-Start:" -ForegroundColor Cyan
     Write-Host "- Witticism will start automatically on Windows login" -ForegroundColor Green
     Write-Host "- Runs silently in background (system tray)" -ForegroundColor White
-    Write-Host "- To disable: Delete files from Startup folder" -ForegroundColor Gray
+    Write-Host "- To disable: delete the Witticism shortcut from the Startup folder" -ForegroundColor Gray
 }
 
 Write-Host ""

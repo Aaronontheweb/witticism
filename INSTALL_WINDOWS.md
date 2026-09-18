@@ -35,11 +35,11 @@ No manual Python version management required!
 
 ### Windows Integration
 - **Desktop shortcut**: Creates shortcut with proper Witticism icon for easy launching
-- **Auto-start**: Sets up silent startup via Windows Startup folder
-  - Creates `WitticismAutoStart.ps1` (PowerShell launcher script)
-  - Creates `WitticismAutoStart.vbs` (VBS wrapper for silent execution)
-  - Runs automatically when Windows user logs in
-  - No console window appears (runs silently in background)
+- **Auto-start**: Sets up silent startup via a Windows Startup-folder shortcut (`.lnk`)
+  - Runs automatically when the Windows user logs in
+  - No console window appears (runs silently in background; a console target shows a minimized window)
+  - No `.vbs` wrapper — uses a standard `.lnk` shortcut so it doesn't look like malware
+  - Older installs using `WitticismAutoStart.ps1`/`.vbs` are cleaned up automatically
 - **System tray integration**: App runs in system tray with right-click menu
 
 ## Manual Installation
@@ -123,8 +123,9 @@ Some antivirus software may block the installation. Try:
 To completely remove Witticism from Windows:
 
 ```powershell
-# 1. Remove auto-start files from startup folder
+# 1. Remove auto-start files from startup folder (.lnk plus legacy .ps1/.vbs)
 $startupFolder = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::Startup)
+Remove-Item (Join-Path $startupFolder "Witticism.lnk") -ErrorAction SilentlyContinue
 Remove-Item (Join-Path $startupFolder "WitticismAutoStart.vbs") -ErrorAction SilentlyContinue
 Remove-Item (Join-Path $startupFolder "WitticismAutoStart.ps1") -ErrorAction SilentlyContinue
 
@@ -152,8 +153,9 @@ python -m pipx uninstall witticism
 To stop Witticism from starting automatically but keep it installed:
 
 ```powershell
-# Remove auto-start files
+# Remove auto-start shortcut (+ legacy files)
 $startupFolder = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::Startup)
+Remove-Item (Join-Path $startupFolder "Witticism.lnk") -ErrorAction SilentlyContinue
 Remove-Item (Join-Path $startupFolder "WitticismAutoStart.*") -ErrorAction SilentlyContinue
 ```
 

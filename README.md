@@ -321,7 +321,7 @@ If you cloned the repo, you can run `.\scripts\uninstall.ps1` directly. (Note: b
 The uninstaller removes:
 - The pipx (or `pip --user`) installation and the `witticism`/`witticism-platform` executables
 - Desktop launcher entry, auto-start entry, and app icons (Linux)
-- The desktop shortcut and Startup-folder auto-start files (Windows)
+- The desktop shortcut and Startup-folder auto-start shortcut (Windows)
 - The optional GNOME Shell extension, if it was installed (Linux)
 - Config and data directories, **only** with `--purge` / `-Purge`
 
