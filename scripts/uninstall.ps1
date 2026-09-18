@@ -3,7 +3,8 @@
 #   - running witticism/pywit process
 #   - pipx (and pip user) installation
 #   - desktop shortcut (Witticism.lnk)
-#   - Startup folder auto-start files (WitticismAutoStart.ps1 / .vbs)
+#   - Startup folder auto-start shortcut (Witticism.lnk), plus legacy
+#     WitticismAutoStart.ps1/.vbs files from older installs
 #   - config/data directories (only with -Purge; kept by default)
 
 param(
@@ -127,13 +128,16 @@ if (Test-Path $shortcutPath) {
 
 # ---- 5. Startup auto-start files --------------------------------------------
 $startupFolder = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::Startup)
-foreach ($name in @("WitticismAutoStart.ps1", "WitticismAutoStart.vbs")) {
-    $p = Join-Path $startupFolder $name
+# Current installs use a Startup .LNK shortcut; older installs used a .ps1/.vbs pair.
+# Remove all three so no virally-sketchy .vbs or redundant scripts linger.
+$startupShortcut = Join-Path $startupFolder "Witticism.lnk"
+foreach ($p in @($startupShortcut, (Join-Path $startupFolder "WitticismAutoStart.ps1"), (Join-Path $startupFolder "WitticismAutoStart.vbs"))) {
+    $leaf = Split-Path $p -Leaf
     if (Test-Path $p) {
         Remove-Item $p -Force -ErrorAction SilentlyContinue
-        Write-Ok "Removed Startup file: $name"
+        Write-Ok "Removed Startup file: $leaf"
     } else {
-        Write-Found "No Startup file: $name"
+        Write-Found "No Startup file: $leaf"
     }
 }
 

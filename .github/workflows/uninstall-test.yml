@@ -194,6 +194,13 @@ jobs:
         $desktop = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::Desktop)
         New-Item -ItemType File -Path (Join-Path $desktop "Witticism.lnk") -Force | Out-Null
         $startup = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::Startup)
+        # Current installs use a Startup .LNK; create a real COM shortcut so the
+        # uninstaller is exercised on an actual .lnk, plus legacy .ps1/.vbs so
+        # it cleans old installs too.
+        $ws = New-Object -ComObject WScript.Shell
+        $sc = $ws.CreateShortcut((Join-Path $startup "Witticism.lnk"))
+        $sc.TargetPath = "C:\Windows\System32\cmd.exe"
+        $sc.Save()
         New-Item -ItemType File -Path (Join-Path $startup "WitticismAutoStart.ps1") -Force | Out-Null
         New-Item -ItemType File -Path (Join-Path $startup "WitticismAutoStart.vbs") -Force | Out-Null
         Write-Host "Desktop/startup footprint created"
@@ -243,7 +250,7 @@ jobs:
 
         # 3. no startup files
         $startup = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::Startup)
-        foreach ($name in @("WitticismAutoStart.ps1","WitticismAutoStart.vbs")) {
+        foreach ($name in @("Witticism.lnk","WitticismAutoStart.ps1","WitticismAutoStart.vbs")) {
           if (Test-Path (Join-Path $startup $name)) {
             Write-Host "ERROR: startup file still exists: $name"; $FAILED = $true
           }
