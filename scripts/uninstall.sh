@@ -66,7 +66,7 @@ fi
 if [ -d "$HOME/.local/share/gnome-shell/extensions/witticism@stannardlabs.com" ]; then
     echo "   Removing optional GNOME Shell extension..."
     if command -v witticism-platform &> /dev/null; then
-        witticism-platform uninstall-gnome-extension --yes 2>/dev/null || true
+        witticism-platform uninstall-gnome-extension 2>/dev/null || true
     fi
     # Direct fallback if the platform CLI is gone but the directory remains.
     if [ -d "$HOME/.local/share/gnome-shell/extensions/witticism@stannardlabs.com" ]; then
@@ -147,6 +147,12 @@ fi
 
 # ---- 7. systemd NVIDIA sleep hook (best-effort, requires sudo) ---------------
 # install.sh only lays this down on GPU machines; CI runners won't have it.
+# The sleep hook has a Witticism-unique name so removal is safe. The NVIDIA
+# power-management config (/etc/modprobe.d/nvidia-power-management.conf) and the
+# standard nvidia-suspend/resume services are intentionally NOT reverted here:
+# that config may predate Witticism (install.sh backs it up rather than owning
+# it) and disabling those services could break a user who depends on them. The
+# config is inert once Witticism is gone. We only remove the hook we own.
 sleep_hook="/usr/lib/systemd/system-sleep/99-nvidia-witticism"
 if [ -f "$sleep_hook" ]; then
     echo "   Removing NVIDIA sleep hook (may prompt for sudo)..."
@@ -159,6 +165,7 @@ if [ -f "$sleep_hook" ]; then
 else
     echo "   No NVIDIA sleep hook found"
 fi
+echo -e "${GREEN}   [OK] NVIDIA power-management config left in place (harmless; see --help)${NC}"
 
 # ---- 8. config / data (only with --purge) -----------------------------------
 if [ "$PURGE" = true ]; then

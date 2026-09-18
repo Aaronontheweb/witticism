@@ -310,12 +310,13 @@ If you cloned the repo, you can run `./scripts/uninstall.sh` directly.
 **Windows:**
 ```powershell
 # Uninstall (keeps config/data)
-irm https://raw.githubusercontent.com/Aaronontheweb/witticism/master/scripts/uninstall.ps1 | iex
+irm https://raw.githubusercontent.com/Aaronontheweb/witticism/master/scripts/uninstall.ps1 -OutFile "$env:TEMP\witticism-uninstall.ps1"
+& "$env:TEMP\witticism-uninstall.ps1"
 
 # Uninstall and delete config/data
-irm https://raw.githubusercontent.com/Aaronontheweb/witticism/master/scripts/uninstall.ps1 | iex -Purge
+& "$env:TEMP\witticism-uninstall.ps1" -Purge
 ```
-If you cloned the repo, you can run `.\scripts\uninstall.ps1` directly.
+If you cloned the repo, you can run `.\scripts\uninstall.ps1` directly. (Note: because the script uses a `param()` block, save it to a file and invoke it — piping to `iex` won't work.)
 
 The uninstaller removes:
 - The pipx (or `pip --user`) installation and the `witticism`/`witticism-platform` executables
@@ -324,7 +325,7 @@ The uninstaller removes:
 - The optional GNOME Shell extension, if it was installed (Linux)
 - Config and data directories, **only** with `--purge` / `-Purge`
 
-On GPU machines, the Linux installer also lays down a systemd NVIDIA sleep hook under `/usr/lib/systemd/system-sleep/`; the uninstaller removes it when it can (sudo required), otherwise it tells you exactly which file to delete.
+On GPU machines, the Linux installer also configures NVIDIA power management: a systemd sleep hook (`/usr/lib/systemd/system-sleep/99-nvidia-witticism`) and a modprobe config (`/etc/modprobe.d/nvidia-power-management.conf`). The uninstaller removes the sleep hook (sudo required; it tells you the exact file if it can't), and intentionally leaves the modprobe config in place — it may predate Witticism, and it's harmless once Witticism is gone. Remove it yourself with `sudo rm /etc/modprobe.d/nvidia-power-management.conf` only if you're sure you no longer want it.
 
 ## Development
 

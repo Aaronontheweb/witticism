@@ -43,24 +43,41 @@ jobs:
         WITTICISM_CPU_ONLY: 1
         WITTICISM_NO_DESKTOP: 1
 
+    - name: Assert install fixture actually installed
+      # Prove the package + CLI stub are really present before we uninstall, so
+      # the "must be absent" checks can't pass vacuously.
+      run: |
+        FAILED=0
+        if ! pipx list 2>/dev/null | grep -q "witticism"; then
+          echo "ERROR: pipx does not list witticism (install fixture failed)"; FAILED=1
+        fi
+        if [ ! -f "$HOME/.local/bin/witticism" ]; then
+          echo "ERROR: ~/.local/bin/witticism missing (install fixture failed)"; FAILED=1
+        fi
+        if [ "$FAILED" -eq 1 ]; then exit 1; fi
+        echo "SUCCESS: install fixture present"
+
     - name: Simulate desktop integration footprint
       # Real CI runners are headless, so install.sh skips desktop/autostart files.
       # Create them manually so the uninstaller is actually exercised against them.
-      # Also seed a config file to assert the default (non-purge) keeps it.
+      # Also seed a config file to assert the default (non-purge) keeps it, and the
+      # GNOME extension dir so the extension-removal branch is covered.
       run: |
         mkdir -p "$HOME/.local/share/applications"
         mkdir -p "$HOME/.config/autostart"
         mkdir -p "$HOME/.local/share/pixmaps"
         mkdir -p "$HOME/.config/witticism"
+        mkdir -p "$HOME/.local/share/gnome-shell/extensions/witticism@stannardlabs.com"
         : > "$HOME/.local/share/applications/witticism.desktop"
         : > "$HOME/.config/autostart/witticism.desktop"
         : > "$HOME/.local/share/pixmaps/witticism.png"
         : > "$HOME/.config/witticism/config.json"
+        : > "$HOME/.local/share/gnome-shell/extensions/witticism@stannardlabs.com/metadata.json"
         for size in 16 24 32 48 64 128 256 512; do
           mkdir -p "$HOME/.local/share/icons/hicolor/${size}x${size}/apps"
           : > "$HOME/.local/share/icons/hicolor/${size}x${size}/apps/witticism.png"
         done
-        echo "Desktop footprint + config seeded"
+        echo "Desktop footprint + config + GNOME extension seeded"
 
     - name: Run uninstaller
       run: bash scripts/uninstall.sh
@@ -84,17 +101,21 @@ jobs:
         if [ -f "$HOME/.config/autostart/witticism.desktop" ]; then
           echo "ERROR: autostart entry still exists"; FAILED=1
         fi
-        # 5. no icons
+        # 5. no GNOME extension
+        if [ -d "$HOME/.local/share/gnome-shell/extensions/witticism@stannardlabs.com" ]; then
+          echo "ERROR: GNOME extension still exists"; FAILED=1
+        fi
+        # 6. no icons
         for size in 16 24 32 48 64 128 256 512; do
           if [ -f "$HOME/.local/share/icons/hicolor/${size}x${size}/apps/witticism.png" ]; then
             echo "ERROR: ${size}x${size} icon still exists"; FAILED=1
           fi
         done
-        # 6. no pixmap
+        # 7. no pixmap
         if [ -f "$HOME/.local/share/pixmaps/witticism.png" ]; then
           echo "ERROR: pixmap icon still exists"; FAILED=1
         fi
-        # 7. default (non-purge) must KEEP config
+        # 8. default (non-purge) must KEEP config
         if [ ! -f "$HOME/.config/witticism/config.json" ]; then
           echo "ERROR: config was deleted without --purge"; FAILED=1
         fi
