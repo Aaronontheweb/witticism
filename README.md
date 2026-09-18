@@ -293,6 +293,40 @@ The force reinstall option will:
 - Reinstall all dependencies fresh
 - Preserve your configuration files (unless you use `--reset-config`)
 
+### Uninstalling
+
+Witticism ships with a dedicated uninstaller for each supported platform. It stops any running process and removes the application, desktop/auto-start entries, and icons — while **keeping your configuration** by default so a later reinstall feels seamless. Add the purge flag to also delete your config and data.
+
+**Linux:**
+```bash
+# Uninstall (keeps ~/.config/witticism)
+bash <(curl -sSL https://raw.githubusercontent.com/Aaronontheweb/witticism/master/scripts/uninstall.sh)
+
+# Uninstall and delete config & data
+bash <(curl -sSL https://raw.githubusercontent.com/Aaronontheweb/witticism/master/scripts/uninstall.sh) --purge
+```
+If you cloned the repo, you can run `./scripts/uninstall.sh` directly.
+
+**Windows:**
+```powershell
+# Uninstall (keeps config/data)
+irm https://raw.githubusercontent.com/Aaronontheweb/witticism/master/scripts/uninstall.ps1 -OutFile "$env:TEMP\witticism-uninstall.ps1"
+& "$env:TEMP\witticism-uninstall.ps1"
+
+# Uninstall and delete config/data
+& "$env:TEMP\witticism-uninstall.ps1" -Purge
+```
+If you cloned the repo, you can run `.\scripts\uninstall.ps1` directly. (Note: because the script uses a `param()` block, save it to a file and invoke it — piping to `iex` won't work.)
+
+The uninstaller removes:
+- The pipx (or `pip --user`) installation and the `witticism`/`witticism-platform` executables
+- Desktop launcher entry, auto-start entry, and app icons (Linux)
+- The desktop shortcut and Startup-folder auto-start files (Windows)
+- The optional GNOME Shell extension, if it was installed (Linux)
+- Config and data directories, **only** with `--purge` / `-Purge`
+
+On GPU machines, the Linux installer also configures NVIDIA power management: a systemd sleep hook (`/usr/lib/systemd/system-sleep/99-nvidia-witticism`) and a modprobe config (`/etc/modprobe.d/nvidia-power-management.conf`). The uninstaller removes the sleep hook (sudo required; it tells you the exact file if it can't), and intentionally leaves the modprobe config in place — it may predate Witticism, and it's harmless once Witticism is gone. Remove it yourself with `sudo rm /etc/modprobe.d/nvidia-power-management.conf` only if you're sure you no longer want it.
+
 ## Development
 
 ### Project Structure
