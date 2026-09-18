@@ -293,6 +293,39 @@ The force reinstall option will:
 - Reinstall all dependencies fresh
 - Preserve your configuration files (unless you use `--reset-config`)
 
+### Uninstalling
+
+Witticism ships with a dedicated uninstaller for each supported platform. It stops any running process and removes the application, desktop/auto-start entries, and icons — while **keeping your configuration** by default so a later reinstall feels seamless. Add the purge flag to also delete your config and data.
+
+**Linux:**
+```bash
+# Uninstall (keeps ~/.config/witticism)
+bash <(curl -sSL https://raw.githubusercontent.com/Aaronontheweb/witticism/master/scripts/uninstall.sh)
+
+# Uninstall and delete config & data
+bash <(curl -sSL https://raw.githubusercontent.com/Aaronontheweb/witticism/master/scripts/uninstall.sh) --purge
+```
+If you cloned the repo, you can run `./scripts/uninstall.sh` directly.
+
+**Windows:**
+```powershell
+# Uninstall (keeps config/data)
+irm https://raw.githubusercontent.com/Aaronontheweb/witticism/master/scripts/uninstall.ps1 | iex
+
+# Uninstall and delete config/data
+irm https://raw.githubusercontent.com/Aaronontheweb/witticism/master/scripts/uninstall.ps1 | iex -Purge
+```
+If you cloned the repo, you can run `.\scripts\uninstall.ps1` directly.
+
+The uninstaller removes:
+- The pipx (or `pip --user`) installation and the `witticism`/`witticism-platform` executables
+- Desktop launcher entry, auto-start entry, and app icons (Linux)
+- The desktop shortcut and Startup-folder auto-start files (Windows)
+- The optional GNOME Shell extension, if it was installed (Linux)
+- Config and data directories, **only** with `--purge` / `-Purge`
+
+On GPU machines, the Linux installer also lays down a systemd NVIDIA sleep hook under `/usr/lib/systemd/system-sleep/`; the uninstaller removes it when it can (sudo required), otherwise it tells you exactly which file to delete.
+
 ## Development
 
 ### Project Structure

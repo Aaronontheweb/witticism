@@ -1,0 +1,259 @@
+name: Uninstall Test
+
+on:
+  push:
+    branches: [ main, master, develop ]
+    paths:
+      - 'install.sh'
+      - 'install.ps1'
+      - 'scripts/uninstall.sh'
+      - 'scripts/uninstall.ps1'
+      - 'INSTALL_WINDOWS.md'
+      - 'pyproject.toml'
+      - 'src/**'
+  pull_request:
+    branches: [ main, master, develop ]
+    paths:
+      - 'install.sh'
+      - 'install.ps1'
+      - 'scripts/uninstall.sh'
+      - 'scripts/uninstall.ps1'
+      - 'INSTALL_WINDOWS.md'
+      - 'pyproject.toml'
+      - 'src/**'
+  workflow_dispatch:
+
+jobs:
+  test-linux-uninstall:
+    runs-on: ubuntu-latest
+    name: Test Linux Uninstall Script
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y portaudio19-dev
+
+    - name: Install Witticism (fixture)
+      run: bash install.sh
+      env:
+        WITTICISM_CPU_ONLY: 1
+        WITTICISM_NO_DESKTOP: 1
+
+    - name: Simulate desktop integration footprint
+      # Real CI runners are headless, so install.sh skips desktop/autostart files.
+      # Create them manually so the uninstaller is actually exercised against them.
+      # Also seed a config file to assert the default (non-purge) keeps it.
+      run: |
+        mkdir -p "$HOME/.local/share/applications"
+        mkdir -p "$HOME/.config/autostart"
+        mkdir -p "$HOME/.local/share/pixmaps"
+        mkdir -p "$HOME/.config/witticism"
+        : > "$HOME/.local/share/applications/witticism.desktop"
+        : > "$HOME/.config/autostart/witticism.desktop"
+        : > "$HOME/.local/share/pixmaps/witticism.png"
+        : > "$HOME/.config/witticism/config.json"
+        for size in 16 24 32 48 64 128 256 512; do
+          mkdir -p "$HOME/.local/share/icons/hicolor/${size}x${size}/apps"
+          : > "$HOME/.local/share/icons/hicolor/${size}x${size}/apps/witticism.png"
+        done
+        echo "Desktop footprint + config seeded"
+
+    - name: Run uninstaller
+      run: bash scripts/uninstall.sh
+
+    - name: Verify footprint removed but config kept
+      run: |
+        FAILED=0
+        # 1. pipx should no longer list witticism
+        if pipx list 2>/dev/null | grep -q "witticism"; then
+          echo "ERROR: pipx still lists witticism"; FAILED=1
+        fi
+        # 2. no ~/.local/bin stub
+        if [ -f "$HOME/.local/bin/witticism" ]; then
+          echo "ERROR: ~/.local/bin/witticism still exists"; FAILED=1
+        fi
+        # 3. no desktop entry
+        if [ -f "$HOME/.local/share/applications/witticism.desktop" ]; then
+          echo "ERROR: desktop entry still exists"; FAILED=1
+        fi
+        # 4. no autostart entry
+        if [ -f "$HOME/.config/autostart/witticism.desktop" ]; then
+          echo "ERROR: autostart entry still exists"; FAILED=1
+        fi
+        # 5. no icons
+        for size in 16 24 32 48 64 128 256 512; do
+          if [ -f "$HOME/.local/share/icons/hicolor/${size}x${size}/apps/witticism.png" ]; then
+            echo "ERROR: ${size}x${size} icon still exists"; FAILED=1
+          fi
+        done
+        # 6. no pixmap
+        if [ -f "$HOME/.local/share/pixmaps/witticism.png" ]; then
+          echo "ERROR: pixmap icon still exists"; FAILED=1
+        fi
+        # 7. default (non-purge) must KEEP config
+        if [ ! -f "$HOME/.config/witticism/config.json" ]; then
+          echo "ERROR: config was deleted without --purge"; FAILED=1
+        fi
+        if [ "$FAILED" -eq 1 ]; then
+          echo "PIPX LIST:"; pipx list 2>/dev/null || echo "(no pipx)"
+          echo "HOME tree:"; find "$HOME/.local" -iname "*witticism*" 2>/dev/null || true
+          exit 1
+        fi
+        echo "SUCCESS: all Linux uninstall checks passed"
+
+  test-linux-uninstall-purge:
+    runs-on: ubuntu-latest
+    name: Test Linux Uninstall --purge
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y portaudio19-dev
+
+    - name: Install Witticism (fixture)
+      run: bash install.sh
+      env:
+        WITTICISM_CPU_ONLY: 1
+        WITTICISM_NO_DESKTOP: 1
+
+    - name: Create config/data dirs
+      run: |
+        mkdir -p "$HOME/.config/witticism"
+        mkdir -p "$HOME/.local/share/witticism"
+        echo "config/data dirs created"
+
+    - name: Run uninstaller with --purge
+      run: bash scripts/uninstall.sh --purge
+
+    - name: Verify config/data also removed
+      run: |
+        FAILED=0
+        if [ -d "$HOME/.config/witticism" ]; then
+          echo "ERROR: config dir still exists"; FAILED=1
+        fi
+        if [ -d "$HOME/.local/share/witticism" ]; then
+          echo "ERROR: data dir still exists"; FAILED=1
+        fi
+        if pipx list 2>/dev/null | grep -q "witticism"; then
+          echo "ERROR: pipx still lists witticism"; FAILED=1
+        fi
+        if [ "$FAILED" -eq 1 ]; then exit 1; fi
+        echo "SUCCESS: purge checks passed"
+
+  test-windows-uninstall:
+    runs-on: windows-latest
+    name: Test Windows Uninstall Script
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Witticism (fixture)
+      shell: powershell
+      run: |
+        Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
+        $env:CI = "true"
+        .\install.ps1 -CPUOnly -SkipAutoStart
+
+    - name: Simulate desktop/startup footprint
+      shell: powershell
+      run: |
+        $desktop = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::Desktop)
+        New-Item -ItemType File -Path (Join-Path $desktop "Witticism.lnk") -Force | Out-Null
+        $startup = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::Startup)
+        New-Item -ItemType File -Path (Join-Path $startup "WitticismAutoStart.ps1") -Force | Out-Null
+        New-Item -ItemType File -Path (Join-Path $startup "WitticismAutoStart.vbs") -Force | Out-Null
+        Write-Host "Desktop/startup footprint created"
+
+    - name: Run uninstaller
+      shell: powershell
+      run: .\scripts\uninstall.ps1
+
+    - name: Verify nothing remains
+      shell: powershell
+      run: |
+        $FAILED = $false
+
+        # Mirror install.ps1's Get-Python312Path so verification targets the
+        # same interpreter that installed witticism. Fail hard if absent so we
+        # can never pass vacuously.
+        function Get-Python312Path {
+          try {
+            $p = py -3.12 -c "import sys; print(sys.executable)" 2>$null
+            if ($LASTEXITCODE -eq 0 -and $p) { return $p.Trim() }
+          } catch {}
+          try {
+            $v = python --version 2>&1
+            if ($v -match "Python 3\.12") { return (Get-Command python).Source }
+          } catch {}
+          foreach ($c in @("$env:LOCALAPPDATA\Programs\Python\Python312\python.exe","$env:PROGRAMFILES\Python312\python.exe","$env:PROGRAMFILES(x86)\Python312\python.exe")) {
+            if (Test-Path $c) {
+              try { $v = & $c --version 2>&1; if ($v -match "Python 3\.12") { return $c } } catch {}
+            }
+          }
+          return $null
+        }
+        $pythonPath = Get-Python312Path
+        if (-not $pythonPath) { throw "Python 3.12 not found for uninstall verification" }
+
+        # 1. pipx should no longer list witticism
+        $pipxList = & $pythonPath -m pipx list 2>&1 | Out-String
+        if ($pipxList -match "witticism") {
+          Write-Host "ERROR: pipx still lists witticism"; $FAILED = $true
+        }
+
+        # 2. no desktop shortcut
+        $desktop = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::Desktop)
+        if (Test-Path (Join-Path $desktop "Witticism.lnk")) {
+          Write-Host "ERROR: desktop shortcut still exists"; $FAILED = $true
+        }
+
+        # 3. no startup files
+        $startup = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::Startup)
+        foreach ($name in @("WitticismAutoStart.ps1","WitticismAutoStart.vbs")) {
+          if (Test-Path (Join-Path $startup $name)) {
+            Write-Host "ERROR: startup file still exists: $name"; $FAILED = $true
+          }
+        }
+
+        if ($FAILED) { throw "Windows uninstall verification failed" }
+        Write-Host "SUCCESS: all Windows uninstall checks passed"
+
+  test-windows-uninstall-pip-user:
+    runs-on: windows-latest
+    name: Test Windows Uninstall (pip --user fallback)
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+
+    - name: Install witticism via pip --user (fallback path)
+      shell: powershell
+      run: |
+        python -m pip install --user witticism --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple
+
+    - name: Run uninstaller
+      shell: powershell
+      run: .\scripts\uninstall.ps1
+
+    - name: Verify pip --user install removed
+      shell: powershell
+      run: |
+        $pipUser = python -m pip list --user 2>&1 | Out-String
+        if ($pipUser -match "witticism") {
+          throw "ERROR: witticism still in pip --user after uninstall"
+        }
+        Write-Host "SUCCESS: pip --user witticism removed by uninstaller"
