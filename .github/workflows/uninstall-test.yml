@@ -44,15 +44,18 @@ jobs:
         WITTICISM_NO_DESKTOP: 1
 
     - name: Assert install fixture actually installed
-      # Prove the package + CLI stub are really present before we uninstall, so
-      # the "must be absent" checks can't pass vacuously.
+      # Prove the package is really present before we uninstall, so the
+      # "must be absent" checks can't pass vacuously. Rely on `command -v`
+      # because on CI runners pipx installs to /opt/pipx/bin, not ~/.local/bin.
       run: |
         FAILED=0
         if ! pipx list 2>/dev/null | grep -q "witticism"; then
           echo "ERROR: pipx does not list witticism (install fixture failed)"; FAILED=1
         fi
-        if [ ! -f "$HOME/.local/bin/witticism" ]; then
-          echo "ERROR: ~/.local/bin/witticism missing (install fixture failed)"; FAILED=1
+        if ! command -v witticism >/dev/null 2>&1; then
+          echo "ERROR: witticism not on PATH (install fixture failed)"
+          echo "PIPX_BIN_DIR=$PIPX_BIN_DIR which: $(which witticism 2>&1 || true)"
+          FAILED=1
         fi
         if [ "$FAILED" -eq 1 ]; then exit 1; fi
         echo "SUCCESS: install fixture present"
@@ -89,9 +92,9 @@ jobs:
         if pipx list 2>/dev/null | grep -q "witticism"; then
           echo "ERROR: pipx still lists witticism"; FAILED=1
         fi
-        # 2. no ~/.local/bin stub
-        if [ -f "$HOME/.local/bin/witticism" ]; then
-          echo "ERROR: ~/.local/bin/witticism still exists"; FAILED=1
+        # 2. no witticism on PATH (CLI stub removed)
+        if command -v witticism >/dev/null 2>&1; then
+          echo "ERROR: witticism still on PATH"; FAILED=1
         fi
         # 3. no desktop entry
         if [ -f "$HOME/.local/share/applications/witticism.desktop" ]; then
@@ -122,6 +125,7 @@ jobs:
         if [ "$FAILED" -eq 1 ]; then
           echo "PIPX LIST:"; pipx list 2>/dev/null || echo "(no pipx)"
           echo "HOME tree:"; find "$HOME/.local" -iname "*witticism*" 2>/dev/null || true
+          echo "PIPX tree:"; find /opt/pipx -iname "*witticism*" 2>/dev/null || true
           exit 1
         fi
         echo "SUCCESS: all Linux uninstall checks passed"
