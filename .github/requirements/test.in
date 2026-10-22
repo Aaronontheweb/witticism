@@ -1,0 +1,7 @@
+pytest
+dbus-next
+platformdirs
+pyperclip
+pynput
+PyQt5
+numpy

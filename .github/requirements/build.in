@@ -1,0 +1,4 @@
+build
+setuptools>=61.0
+wheel
+setuptools_scm[toml]>=6.2
