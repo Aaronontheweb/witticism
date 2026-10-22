@@ -267,7 +267,8 @@ class WitticismApp:
                 model_size=model_size,
                 device=self.config_manager.get("model.device"),
                 compute_type=self.config_manager.get("model.compute_type"),
-                language=self.config_manager.get("model.language", "en")
+                language=self.config_manager.get("model.language", "en"),
+                hotwords=self.config_manager.get("model.hotwords", "")
             )
 
             # CRITICAL: Enable sleep monitoring BEFORE any CUDA operations or model loading

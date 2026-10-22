@@ -191,13 +191,42 @@ Key settings:
 {
   "model": {
     "size": "base",
-    "device": "auto"
+    "device": "auto",
+    "hotwords": ""
   },
   "hotkeys": {
     "push_to_talk": "f9"
   }
 }
 ```
+
+### Custom Vocabulary
+
+Whisper often misspells proper nouns, product names, and technical jargon
+(for example, "Akka.NET", "Petabridge", or "Phobos"). You can bias
+transcription toward the correct spellings by giving Whisper a **custom
+vocabulary** — a short list of terms it should expect to hear.
+
+Set it in **Settings → Transcription Settings → Custom Vocabulary** (a
+comma-separated list works well), or edit `model.hotwords` in `config.json`
+directly:
+
+```json
+"model": {
+  "hotwords": "Akka.NET, Petabridge, Phobos, Akka.Cluster, Aaron Stannard, dead letters"
+}
+```
+
+The list is passed to Whisper as "hotwords" — terms it should expect and
+prefer when it's unsure.
+
+Notes:
+- Keep it short — roughly 50 words / 224 tokens is the ceiling; it's a
+  spelling hint, not an unlimited dictionary.
+- It biases transcription but doesn't guarantee a term is always emitted.
+- It applies to every transcription, so list only terms you use regularly.
+- Changing it reloads the active model (a few seconds) so the new vocabulary
+  takes effect right away.
 
 ## Performance
 
