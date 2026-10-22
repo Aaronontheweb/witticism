@@ -28,23 +28,24 @@ jobs:
       with:
         python-version: '3.11'
     
+    # This job holds the PyPI publishing token, so every tool it runs is
+    # hash-pinned and the build backend comes from the same lock (--no-isolation)
+    # rather than being resolved fresh from PyPI.
     - name: Install build tools
-      run: |
-        python -m pip install --upgrade pip
-        pip install build
+      run: pip install --require-hashes -r .github/requirements/build.txt
     
     - name: Build package
-      run: python -m build
+      run: python -m build --no-isolation
     
     - name: Publish to PyPI
       if: startsWith(github.ref, 'refs/tags/')
-      uses: pypa/gh-action-pypi-publish@release/v1
+      uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
       with:
         verbose: true
     
     - name: Create GitHub Release
       if: startsWith(github.ref, 'refs/tags/')
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
       with:
         files: |
           dist/*
